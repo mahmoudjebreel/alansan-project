@@ -34,6 +34,15 @@ final class ImportDefinition
      * @param  array<string>  $computed  Fields the system derives itself. They are
      *                                   stripped from uploaded rows so a value in
      *                                   the file can never override the calculation.
+     * @param  array<string, array<string, string>>  $synonyms  Spellings a real file
+     *                                   uses that the Select does not offer, as
+     *                                   field => [accepted input => stored value].
+     *                                   Matched after the option list itself, so a
+     *                                   synonym can never shadow a real option.
+     * @param  array<string>  $collapseWhitespace  Free-text fields whose inner runs
+     *                                   of spaces are squeezed to one before the
+     *                                   value is stored, so "mixed  feeding" and
+     *                                   "mixed feeding" do not become two spellings.
      */
     public function __construct(
         public readonly string $key,
@@ -44,6 +53,8 @@ final class ImportDefinition
         public readonly string $permission,
         public readonly string $filename,
         public readonly array $computed = [],
+        public readonly array $synonyms = [],
+        public readonly array $collapseWhitespace = [],
     ) {
     }
 
@@ -104,6 +115,40 @@ final class ImportDefinition
                 filename: 'individual-counselings',
                 // MUAC degree is always re-derived from MUAC by the model.
                 computed: ['muac_degree'],
+                // Spellings the programme's own workbooks are full of.
+                synonyms: [
+                    'child_visit_type' => ['follow' => 'follow_up', 'f/u' => 'follow_up'],
+                    'mother_visit_type' => ['follow' => 'follow_up', 'f/u' => 'follow_up'],
+                    // The composite is stored as P+L and shown as P/L.
+                    'p_l' => ['p/l' => 'P+L', 'pl' => 'P+L', 'pregnant' => 'P', 'lactating' => 'L'],
+                    'gender' => ['male' => 'M', 'female' => 'F', 'm' => 'M', 'f' => 'F'],
+                    // Feeding patterns as the older sheets spell them. Only
+                    // unambiguous spellings are mapped: a bare "complementary
+                    // feeding" does not say whether it is with BF or with
+                    // formula, so it is refused rather than guessed at.
+                    'feeding_type' => [
+                        'ebf' => 'Exclusive Breastfeeding',
+                        'exclusive bf' => 'Exclusive Breastfeeding',
+                        'exclusive breast feeding' => 'Exclusive Breastfeeding',
+                        'breastfeeding' => 'Exclusive Breastfeeding',
+                        'breast feeding' => 'Exclusive Breastfeeding',
+                        'formula' => 'Formula Feeding',
+                        'formula milk' => 'Formula Feeding',
+                        'artificial feeding' => 'Formula Feeding',
+                        'mixed' => 'Mixed Feeding',
+                        'mixed milk' => 'Mixed Feeding',
+                        'mix feeding' => 'Mixed Feeding',
+                        'predominant' => 'Predominant Feeding',
+                        'predominant breastfeeding' => 'Predominant Feeding',
+                        'complementary feeding with bf' => 'Complementary Feeding with BF',
+                        'cf with bf' => 'Complementary Feeding with BF',
+                        'cf with formula' => 'Complementary Feeding with Formula',
+                        'weaning' => 'Weaning and On Family Foods',
+                        'family foods' => 'Weaning and On Family Foods',
+                        'on family foods' => 'Weaning and On Family Foods',
+                    ],
+                ],
+                collapseWhitespace: ['feeding_type'],
             ),
             new self(
                 key: 'follow_up_children',
@@ -170,5 +215,21 @@ final class ImportDefinition
     public function hasVisits(): bool
     {
         return $this->model === FollowUpChild::class;
+    }
+
+    /**
+     * Whether this module carries the numbered follow-up session columns.
+     */
+    public function hasFollowups(): bool
+    {
+        return $this->model === IndividualCounseling::class;
+    }
+
+    /**
+     * Follow-up sessions one record may hold, when it holds any at all.
+     */
+    public function maxFollowups(): int
+    {
+        return IndividualCounseling::MAX_FOLLOWUP_SESSIONS;
     }
 }

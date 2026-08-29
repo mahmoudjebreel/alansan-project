@@ -275,12 +275,19 @@ class IndividualCounselingResource extends Resource
                     ->validationMessages(static::messagesFor('child_age_lactated', [
                         'required' => 'val_required',
                     ])),
-                Forms\Components\TextInput::make('feeding_type')
+                // A closed list rather than free text: the same seven feeding
+                // patterns were being typed a dozen different ways. The rule is
+                // spelled out rather than left to the Select, so a value posted
+                // outside the list is refused with a message that names the list.
+                Forms\Components\Select::make('feeding_type')
                     ->label(__('fields.feeding_type'))
+                    ->options(static::feedingTypeOptions())
                     ->required()
-                    ->maxLength(255)
+                    ->native(false)
+                    ->rules([\Illuminate\Validation\Rule::in(static::feedingTypeValues())])
                     ->validationMessages(static::messagesFor('feeding_type', [
                         'required' => 'val_required',
+                        'in' => 'val_in_list',
                     ])),
             ])->columns(2);
     }
@@ -319,11 +326,6 @@ class IndividualCounselingResource extends Resource
                     ->label(__('fields.outcome'))
                     ->options(static::outcomeOptions())
                     ->native(false),
-                Forms\Components\Select::make('assess')
-                    ->label(__('fields.assess'))
-                    ->options(static::assessOptions())
-                    ->searchable()
-                    ->native(false),
                 Forms\Components\Select::make('pregnancy')
                     ->label(__('fields.pregnancy'))
                     ->options(static::yesNoTextOptions())
@@ -345,8 +347,17 @@ class IndividualCounselingResource extends Resource
                     ->validationMessages(static::messagesFor('pregnancy_count', [
                         'numeric' => 'val_numeric',
                     ])),
-                Forms\Components\Textarea::make('assess_and_analyze')
-                    ->label(__('fields.assess_and_analyze'))
+                // The base visit keeps Assess and Analyze apart; only the
+                // follow-up sessions merge them into one field. Both are free
+                // prose written in the counsellor's own words, never a pick
+                // list — the historical option list could not cover what
+                // actually gets recorded.
+                Forms\Components\Textarea::make('assess')
+                    ->label(__('fields.assess'))
+                    ->rows(3)
+                    ->columnSpanFull(),
+                Forms\Components\Textarea::make('analyze')
+                    ->label(__('fields.analyze'))
                     ->rows(3)
                     ->columnSpanFull(),
                 Forms\Components\Textarea::make('act')
@@ -363,7 +374,8 @@ class IndividualCounselingResource extends Resource
     protected static function getFollowUpSessionsSection(): Component
     {
         return Section::make(__('fields.follow_up_sessions'))
-            ->description(__('fields.follow_up_sessions_hint'))
+            ->description(__('fields.follow_up_sessions_hint') . ' '
+                . __('fields.follow_up_sessions_max_hint', ['max' => IndividualCounseling::MAX_FOLLOWUP_SESSIONS]))
             ->schema([
                 Forms\Components\Repeater::make('followups')
                     ->label(__('fields.follow_up_sessions'))
@@ -393,6 +405,9 @@ class IndividualCounselingResource extends Resource
                         ? __('fields.follow_up_visit_date') . ': ' . $state['follow_up_visit_date']
                         : null)
                     ->defaultItems(0)
+                    // Filament drops the add action of its own accord once the
+                    // limit is reached, which is exactly the wanted behaviour.
+                    ->maxItems(IndividualCounseling::MAX_FOLLOWUP_SESSIONS)
                     ->addActionLabel(__('fields.add_follow_up_session'))
                     ->orderColumn('sort_order')
                     ->collapsible()
@@ -442,7 +457,7 @@ class IndividualCounselingResource extends Resource
                                     FilamentInfolist::enum('child_visit_type'),
                                     FilamentInfolist::date('child_dob'),
                                     FilamentInfolist::text('age_months'),
-                                    FilamentInfolist::enum('gender'),
+                                    FilamentInfolist::text('gender'),
                                 ])->columns(2),
                             Section::make(__('fields.mother_data'))
                                 ->schema([
@@ -484,7 +499,7 @@ class IndividualCounselingResource extends Resource
                                     FilamentInfolist::enum('lactating'),
                                     FilamentInfolist::date('delivery_date'),
                                     FilamentInfolist::text('pregnancy_count'),
-                                    FilamentInfolist::text('assess_and_analyze')->columnSpanFull(),
+                                    FilamentInfolist::text('analyze')->columnSpanFull(),
                                     FilamentInfolist::text('act')->columnSpanFull(),
                                 ])->columns(2),
                             Section::make(__('fields.follow_up_sessions'))
@@ -608,10 +623,38 @@ class IndividualCounselingResource extends Resource
     }
 
     public static function visitTypeOptions(): array { return ['new' => __('fields.new'), 'follow_up' => __('fields.follow_up')]; }
-    public static function genderOptions(): array { return ['M' => __('fields.M'), 'F' => __('fields.F')]; }
+    /** Stored and shown as the short codes the programme uses, never Male/Female. */
+    public static function genderOptions(): array { return ['M' => __('fields.gender_m'), 'F' => __('fields.gender_f')]; }
     public static function pregnantLactatingOptions(): array { return ['L' => __('fields.L'), 'P' => __('fields.P'), 'P+L' => __('fields.P+L')]; }
+    /**
+     * The seven feeding patterns the programme records.
+     *
+     * Stored verbatim rather than as snake_case keys, so the value in the
+     * database, in the Excel export and in the PDF is always one of these
+     * seven strings exactly.
+     *
+     * @return array<string>
+     */
+    public static function feedingTypeValues(): array
+    {
+        return [
+            'Exclusive Breastfeeding',
+            'Formula Feeding',
+            'Mixed Feeding',
+            'Predominant Feeding',
+            'Complementary Feeding with BF',
+            'Complementary Feeding with Formula',
+            'Weaning and On Family Foods',
+        ];
+    }
+
+    public static function feedingTypeOptions(): array
+    {
+        return array_combine(static::feedingTypeValues(), static::feedingTypeValues());
+    }
+
     public static function childAgeLactatedOptions(): array { return ['less_6_months' => __('fields.less_6_months'), '6_23_months' => __('fields.6_23_months'), '24_59_months' => __('fields.24_59_months')]; }
-    public static function shelterOptions(): array { return ['mosaab_camp' => __('fields.mosaab_camp'), 'mahabba' => __('fields.mahabba'), 'el_salam' => __('fields.el_salam'), 'el_qoqa' => __('fields.el_qoqa')]; }
+    public static function shelterOptions(): array { return ['mosaab_camp' => __('fields.mosaab_camp'), 'mahabba' => __('fields.mahabba'), 'el_salam' => __('fields.el_salam'), 'el_qoqa' => __('fields.el_qoqa'), 'al_helou' => __('fields.al_helou')]; }
     public static function yesNoOptions(): array { return [1 => __('fields.yes'), 0 => __('fields.no')]; }
     public static function yesNoTextOptions(): array { return ['yes' => __('fields.yes'), 'no' => __('fields.no')]; }
     public static function consultationOptions(): array { return ['complementary_feeding' => __('fields.complementary_feeding'), 'bf_support' => __('fields.bf_support'), 'relactation' => __('fields.relactation'), 'other' => __('fields.other')]; }

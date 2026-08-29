@@ -19,8 +19,10 @@ class IndividualCounselingExport extends AbstractTableExport
             'muac', 'muac_degree', 'mother_id_number', 'mother_name',
             'mother_visit_type', 'mother_dob', 'mother_age_years', 'mobile_number',
             'shelter_name', 'consultation', 'iycf_form_filled', 'status', 'outcome',
-            'assess', 'act', 'pregnancy', 'lactating', 'delivery_date',
-            'pregnancy_count', 'assess_and_analyze', 'follow_up_visit_date',
+            // Assess and Analyze are two separate base-visit columns here;
+            // the merged "Assess and analyze" belongs to the session groups.
+            'assess', 'analyze', 'act', 'pregnancy', 'lactating', 'delivery_date',
+            'pregnancy_count',
         ];
     }
 
@@ -40,7 +42,8 @@ class IndividualCounselingExport extends AbstractTableExport
     }
 
     /**
-     * The own columns, then one group of three columns per follow-up session.
+     * The own columns, then one numbered group of three columns per follow-up
+     * session: date, merged assessment, action.
      */
     public function headings(): array
     {
@@ -75,8 +78,9 @@ class IndividualCounselingExport extends AbstractTableExport
     }
 
     /**
-     * Most follow-up sessions held by any one record in the exported data set
-     * (at least 1, so the column group is always present).
+     * Most follow-up sessions held by any one record in the exported data set,
+     * never more than the six a record may hold and never fewer than 1, so the
+     * column group is always present.
      */
     protected function maxFollowups(): int
     {
@@ -93,8 +97,11 @@ class IndividualCounselingExport extends AbstractTableExport
             ->groupBy('individual_counseling_id')
             ->selectRaw('COUNT(*) as aggregate');
 
-        return $this->maxFollowups = max(1, (int) DB::query()
-            ->fromSub($perRecord, 'counts')
-            ->max('aggregate'));
+        return $this->maxFollowups = max(1, min(
+            IndividualCounseling::MAX_FOLLOWUP_SESSIONS,
+            (int) DB::query()
+                ->fromSub($perRecord, 'counts')
+                ->max('aggregate'),
+        ));
     }
 }

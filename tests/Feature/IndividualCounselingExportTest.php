@@ -211,7 +211,8 @@ class IndividualCounselingExportTest extends TestCase
     public function test_the_records_own_columns_are_unaffected(): void
     {
         $record = $this->counseling([
-            'assess_and_analyze' => 'Own assessment',
+            'assess' => 'Own assessment',
+            'analyze' => 'Own analysis',
             'act' => 'Own action',
         ]);
 
@@ -227,7 +228,91 @@ class IndividualCounselingExportTest extends TestCase
 
         $this->assertSame('2026-07-10', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.date')), 2)->getValue());
         $this->assertSame('Test child', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.child_name')), 2)->getValue());
-        $this->assertSame('Own assessment', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.assess_and_analyze')), 2)->getValue());
+        $this->assertSame('Own assessment', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.assess')), 2)->getValue());
+        $this->assertSame('Own analysis', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.analyze')), 2)->getValue());
         $this->assertSame('Own action', $sheet->getCellByColumnAndRow($this->columnOf($sheet, __('fields.act')), 2)->getValue());
+    }
+
+    /**
+     * The base visit keeps Assess and Analyze in two columns of their own. The
+     * merged "Assess and analyze" only ever belongs to a numbered session, so
+     * the three headings have to be three distinct columns.
+     */
+    public function test_the_base_visit_assess_and_analyze_stay_separate_columns(): void
+    {
+        $record = $this->counseling(['assess' => 'Base assess', 'analyze' => 'Base analyze']);
+
+        $record->followups()->create([
+            'sort_order' => 1,
+            'follow_up_visit_date' => '2026-07-20',
+            'assess_and_analyze' => 'Merged for session one',
+            'act' => 'Acted',
+        ]);
+
+        $sheet = $this->sheet();
+
+        $assess = $this->columnOf($sheet, __('fields.assess'));
+        $analyze = $this->columnOf($sheet, __('fields.analyze'));
+        $merged = $this->columnOf($sheet, __('fields.followup_assess_n', ['n' => 1]));
+
+        $this->assertCount(3, array_unique([$assess, $analyze, $merged]));
+
+        $this->assertSame('Base assess', $sheet->getCellByColumnAndRow($assess, 2)->getValue());
+        $this->assertSame('Base analyze', $sheet->getCellByColumnAndRow($analyze, 2)->getValue());
+        $this->assertSame('Merged for session one', $sheet->getCellByColumnAndRow($merged, 2)->getValue());
+    }
+
+    /**
+     * The record no longer carries a follow-up date of its own: every session
+     * date lives in its numbered column group.
+     */
+    public function test_the_flat_follow_up_columns_are_gone_from_the_export(): void
+    {
+        $this->counseling();
+
+        $headings = (new IndividualCounselingExport(IndividualCounseling::query()))->headings();
+
+        $this->assertNotContains(__('fields.follow_up_visit_date'), $headings);
+        $this->assertNotContains(__('fields.assess_and_analyze'), $headings);
+    }
+
+    /**
+     * Six sessions is the ceiling, so six column groups is the widest the
+     * export can ever get — a seventh session row cannot widen it further.
+     */
+    public function test_the_session_column_groups_stop_at_the_sixth(): void
+    {
+        $record = $this->counseling();
+
+        foreach (range(1, IndividualCounseling::MAX_FOLLOWUP_SESSIONS + 1) as $order) {
+            $record->followups()->create([
+                'sort_order' => $order,
+                'follow_up_visit_date' => '2026-07-01',
+                'assess_and_analyze' => 'A' . $order,
+                'act' => 'B' . $order,
+            ]);
+        }
+
+        $sheet = $this->sheet();
+
+        $this->assertSame(
+            Coordinate::columnIndexFromString($sheet->getHighestColumn()),
+            $this->columnOf($sheet, __('fields.followup_act_n', ['n' => 6])),
+            'The last column must close the sixth session group.',
+        );
+    }
+
+    /**
+     * A data set with no sessions at all still carries one group, so the file
+     * always has somewhere to type the first session.
+     */
+    public function test_a_data_set_without_sessions_still_carries_one_group(): void
+    {
+        $this->counseling();
+
+        $headings = (new IndividualCounselingExport(IndividualCounseling::query()))->headings();
+
+        $this->assertContains(__('fields.followup_date_n', ['n' => 1]), $headings);
+        $this->assertNotContains(__('fields.followup_date_n', ['n' => 2]), $headings);
     }
 }

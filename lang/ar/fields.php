@@ -174,6 +174,7 @@ return [
     'mahabba' => 'المحبة',
     'el_salam' => 'السلام',
     'el_qoqa' => 'القوقا',
+    'al_helou' => 'الحلو',
     'caregiver_child_under_6_months' => 'مقدم رعاية لطفل أقل من 6 أشهر',
     'caregiver_child_6_23_months' => 'مقدم رعاية لطفل 6-23 شهراً',
     'grandmothers' => 'الجدات',
@@ -226,6 +227,7 @@ return [
     'pregnancy' => 'الحمل',
     'delivery_date' => 'تاريخ الولادة',
     'pregnancy_count' => 'عدد مرات الحمل',
+    'analyze' => 'التحليل',
     'assess_and_analyze' => 'التقييم والتحليل',
     'follow_up_visit_date' => 'تاريخ زيارة المتابعة',
 
@@ -240,16 +242,24 @@ return [
     'optional_data_hint' => 'حقول إضافية، باستثناء نموذج IYCF والحالة فهما مطلوبان.',
     'follow_up_sessions' => 'جلسات المتابعة',
     'follow_up_sessions_hint' => 'اختياري بالكامل — يمكن حفظ السجل بدون أي جلسة متابعة.',
+    'no_follow_up_sessions' => 'لا توجد جلسات متابعة مسجّلة.',
+    'no_visits' => 'لا توجد زيارات مسجّلة.',
     'add_follow_up_session' => 'إضافة جلسة متابعة',
-    'followup_date_n' => 'تاريخ زيارة المتابعة :n',
-    'followup_assess_n' => 'التقييم والتحليل للمتابعة :n',
-    'followup_act_n' => 'الإجراء للمتابعة :n',
+    'followup_date_n' => 'الجلسة :n — تاريخ زيارة المتابعة',
+    'followup_assess_n' => 'الجلسة :n — التقييم والتحليل',
+    'followup_act_n' => 'الجلسة :n — الإجراء',
+    // أسماء بديلة تُقبل عند الاستيراد فقط: عناوين الأعمدة قبل إعادة التسمية.
+    'followup_date_n_alt' => 'تاريخ زيارة المتابعة :n',
+    'followup_assess_n_alt' => 'التقييم والتحليل للمتابعة :n',
+    'followup_act_n_alt' => 'الإجراء للمتابعة :n',
+    'followup_date_n_alt2' => 'الجلسة :n — التاريخ',
+    'follow_up_sessions_max_hint' => 'حتى :max جلسات كحد أقصى. يختفي زر الإضافة عند الوصول إلى الجلسة الأخيرة.',
     'muac_degree_hint' => 'تُحتسب تلقائياً من قياس المواك: ‏115 فأقل = SAM، ‏116-124 = MAM، ‏125 فأكثر = Normal.',
 
     // Individual Counseling — option labels
     'L' => 'L (مرضع)',
     'P' => 'P (حامل)',
-    'P+L' => 'P+L (حامل ومرضع)',
+    'P+L' => 'P/L (حامل ومرضع)',
     'less_6_months' => 'أقل من 6 أشهر',
     '6_23_months' => '6-23 شهراً',
     '24_59_months' => '24-59 شهراً',
@@ -257,6 +267,7 @@ return [
     // Validation message templates
     'val_required' => 'حقل :field مطلوب.',
     'val_date' => 'حقل :field يجب أن يكون تاريخاً صحيحاً.',
+    'val_in_list' => 'حقل :field يجب أن يكون إحدى القيم المتاحة في القائمة.',
     'val_numeric' => 'حقل :field يجب أن يكون رقماً.',
     'val_digits_9' => 'حقل :field يجب أن يتكون من 9 أرقام بالضبط.',
     'val_digits_10' => 'حقل :field يجب أن يتكون من 10 أرقام بالضبط.',
@@ -288,6 +299,9 @@ return [
     'latest_muac' => 'آخر قياس مواك (مم)',
     'M' => 'ذكر',
     'F' => 'أنثى',
+    // الإرشاد الفردي يخزّن ويعرض الرمز المختصر لا الكلمة.
+    'gender_m' => 'M',
+    'gender_f' => 'F',
     'age_years_months' => ':years سنة :months شهر',
     'age_months_only' => ':months شهر',
     'visit_date_n' => 'تاريخ الزيارة :n',
@@ -312,6 +326,7 @@ return [
     'import_unreadable_option' => 'تعذّر التحقق من قيمة الحقل :field — قائمة الخيارات المعتمدة لهذا الحقل غير متاحة، فلم يتم قبول القيمة. يرجى إبلاغ مسؤول النظام.',
     'import_invalid_date' => 'تاريخ غير صالح للحقل :field.',
     'import_invalid_number' => 'الحقل :field يجب أن يكون رقماً.',
+    'import_too_many_sessions' => 'يحتوي الملف على جلسة المتابعة رقم :n، بينما الحد الأقصى المسموح به لكل سجل هو :max جلسات. يرجى حذف أعمدة الجلسات الزائدة ثم إعادة الرفع.',
     'import_example_row' => 'صف تجريبي — احذف هذا السطر قبل الرفع',
 
     // MEAL monthly monitoring report

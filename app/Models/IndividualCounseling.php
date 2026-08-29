@@ -18,6 +18,14 @@ class IndividualCounseling extends Model
 
     protected $table = 'individual_counselings';
 
+    /**
+     * Follow-up sessions a single record may hold.
+     *
+     * Deliberately lower than FollowUpChild::MAX_VISITS: the counseling
+     * programme closes a case after six sessions.
+     */
+    public const MAX_FOLLOWUP_SESSIONS = 6;
+
     protected $fillable = [
         'date',
         'health_educator',
@@ -43,13 +51,12 @@ class IndividualCounseling extends Model
         'status',
         'outcome',
         'assess',
+        'analyze',
         'act',
         'pregnancy',
         'lactating',
         'delivery_date',
         'pregnancy_count',
-        'assess_and_analyze',
-        'follow_up_visit_date',
     ];
 
     protected $casts = [
@@ -57,7 +64,6 @@ class IndividualCounseling extends Model
         'child_dob' => 'date',
         'mother_dob' => 'date',
         'delivery_date' => 'date',
-        'follow_up_visit_date' => 'date',
         'iycf_form_filled' => 'boolean',
         'age_months' => 'integer',
         'muac' => 'decimal:1',

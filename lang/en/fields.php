@@ -172,6 +172,7 @@ return [
     'mahabba' => 'Mahabba',
     'el_salam' => 'El Salam',
     'el_qoqa' => 'El Qoqa',
+    'al_helou' => 'Al Helou',
     'caregiver_child_under_6_months' => 'Caregiver with Child <6 Months',
     'caregiver_child_6_23_months' => 'Caregiver with Child 6-23 Months',
     'grandmothers' => 'Grandmothers',
@@ -224,6 +225,7 @@ return [
     'pregnancy' => 'Pregnancy',
     'delivery_date' => 'Delivery date',
     'pregnancy_count' => 'No. of pregnancy',
+    'analyze' => 'Analyze',
     'assess_and_analyze' => 'Assess and analyze',
     'follow_up_visit_date' => 'Follow up visit date',
 
@@ -238,16 +240,24 @@ return [
     'optional_data_hint' => 'Additional fields. IYCF form and Status are required despite sitting here.',
     'follow_up_sessions' => 'Follow-Up Sessions',
     'follow_up_sessions_hint' => 'Entirely optional — a record can be saved with no follow-up sessions.',
+    'no_follow_up_sessions' => 'No follow-up sessions were recorded.',
+    'no_visits' => 'No visits were recorded.',
     'add_follow_up_session' => 'Add Follow-Up Session',
-    'followup_date_n' => 'Follow-Up :n Date',
-    'followup_assess_n' => 'Follow-Up :n Assess and Analyze',
-    'followup_act_n' => 'Follow-Up :n Act',
+    'followup_date_n' => 'Session :n Follow up visit date',
+    'followup_assess_n' => 'Session :n Assess and Analyze',
+    'followup_act_n' => 'Session :n Act',
+    // Import-only aliases: headings produced before the columns were renamed.
+    'followup_date_n_alt' => 'Follow-Up :n Date',
+    'followup_assess_n_alt' => 'Follow-Up :n Assess and Analyze',
+    'followup_act_n_alt' => 'Follow-Up :n Act',
+    'followup_date_n_alt2' => 'Session :n Date',
+    'follow_up_sessions_max_hint' => 'Up to :max sessions. The add button disappears once the last one is filled in.',
     'muac_degree_hint' => 'Derived from MUAC: 115 or less = SAM, 116-124 = MAM, 125 or more = Normal.',
 
     // Individual Counseling — option labels
     'L' => 'L (Lactating)',
     'P' => 'P (Pregnant)',
-    'P+L' => 'P+L (Pregnant & Lactating)',
+    'P+L' => 'P/L (Pregnant & Lactating)',
     'less_6_months' => 'Less 6 Months',
     '6_23_months' => '6-23 Months',
     '24_59_months' => '24-59 Months',
@@ -255,6 +265,7 @@ return [
     // Validation message templates
     'val_required' => 'The :field field is required.',
     'val_date' => 'The :field field must be a valid date.',
+    'val_in_list' => 'The :field field must be one of the listed options.',
     'val_numeric' => 'The :field field must be a number.',
     'val_digits_9' => 'The :field field must be exactly 9 digits.',
     'val_digits_10' => 'The :field field must be exactly 10 digits.',
@@ -286,6 +297,9 @@ return [
     'latest_muac' => 'Latest MUAC (mm)',
     'M' => 'Male',
     'F' => 'Female',
+    // Individual Counseling stores and shows the short codes, not the words.
+    'gender_m' => 'M',
+    'gender_f' => 'F',
     'age_years_months' => ':years y :months m',
     'age_months_only' => ':months m',
     'visit_date_n' => 'Visit :n Date',
@@ -310,6 +324,7 @@ return [
     'import_unreadable_option' => 'Could not verify the value for :field — its list of accepted options is unavailable, so the value was not accepted. Please report this to the system administrator.',
     'import_invalid_date' => 'Invalid date for :field.',
     'import_invalid_number' => ':field must be a number.',
+    'import_too_many_sessions' => 'The file carries follow-up session :n, but a record may hold at most :max sessions. Remove the extra session columns and upload again.',
     'import_example_row' => 'Example row — delete this line before uploading',
 
     // MEAL monthly monitoring report

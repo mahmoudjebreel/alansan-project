@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Imports\AbstractTableImport;
 use App\Imports\ImportDefinition;
 use App\Models\FollowUpChild;
+use App\Models\IndividualCounseling;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
@@ -61,7 +62,7 @@ final class ExcelImportService
             DB::transaction(function () use ($definition, $rows): void {
                 foreach ($rows as $row) {
                     try {
-                        $this->createRecord($definition, $row['attributes'], $row['visits']);
+                        $this->createRecord($definition, $row['attributes'], $row['visits'], $row['followups'] ?? []);
                     } catch (\Illuminate\Database\QueryException $e) {
                         // Surface the offending row instead of a raw SQL dump.
                         throw new RowImportException(
@@ -86,7 +87,7 @@ final class ExcelImportService
      * Persist one row through the model, so accessors/mutators still run and
      * derived values (FI, MUAC degree) are recalculated rather than imported.
      */
-    private function createRecord(ImportDefinition $definition, array $attributes, array $visits): void
+    private function createRecord(ImportDefinition $definition, array $attributes, array $visits, array $followups = []): void
     {
         /** @var class-string<Model> $modelClass */
         $modelClass = $definition->model;
@@ -109,6 +110,20 @@ final class ExcelImportService
                     'visit_number' => $visit['visit_number'],
                     'visit_date' => $visit['visit_date'],
                     'muac' => $visit['muac'],
+                ]);
+            }
+        }
+
+        // Numbered session columns become one related row each, never flat
+        // columns on the record. sort_order is the position the sessions were
+        // read in, which is what the form and the export both number from.
+        if ($followups !== [] && $model instanceof IndividualCounseling) {
+            foreach (array_values($followups) as $position => $session) {
+                $model->followups()->create([
+                    'sort_order' => $position + 1,
+                    'follow_up_visit_date' => $session['follow_up_visit_date'],
+                    'assess_and_analyze' => $session['assess_and_analyze'],
+                    'act' => $session['act'],
                 ]);
             }
         }

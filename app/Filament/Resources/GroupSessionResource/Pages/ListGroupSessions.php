@@ -47,7 +47,7 @@ class ListGroupSessions extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('group_sessions.export') ?? false, 403);
-        return PdfExport::download(new GroupSessionExport($this->exportQuery()), 'exports.group-sessions-pdf', 'group-sessions.pdf', __('fields.group_sessions'));
+        return PdfExport::download(new GroupSessionExport($this->exportQuery()), 'group-sessions.pdf', __('fields.group_sessions'), 'full_name_ar');
     }
 
     private function exportQuery()

@@ -5,7 +5,7 @@ namespace App\Filament\Resources\IndividualCounselingResource\Pages;
 use App\Events\ExcelActionOccurred;
 use App\Support\Notifications\ActionType;
 use App\Exports\IndividualCounselingExport;
-use App\Exports\PdfExport;
+use App\Exports\IndividualCounselingPdfExport;
 use App\Filament\Resources\IndividualCounselingResource;
 use App\Filament\Concerns\HasExcelImport;
 use Filament\Actions;
@@ -47,7 +47,13 @@ class ListIndividualCounselings extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('individual_counseling.export') ?? false, 403);
-        return PdfExport::download(new IndividualCounselingExport($this->exportQuery()), 'exports.individual-counselings-pdf', 'individual-counselings.pdf', __('fields.individual_counselings'));
+        // This module has its own PDF builder: six session groups would be
+        // eighteen unreadable extra columns in the shared flat-table report.
+        return IndividualCounselingPdfExport::download(
+            $this->exportQuery(),
+            'individual-counselings.pdf',
+            __('fields.individual_counselings'),
+        );
     }
 
     private function exportQuery()

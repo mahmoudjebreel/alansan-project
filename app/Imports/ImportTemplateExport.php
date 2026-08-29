@@ -47,6 +47,15 @@ class ImportTemplateExport implements FromArray, WithHeadings, WithStyles, Shoul
             }
         }
 
+        // Three cells per follow-up session: date, merged assessment, action.
+        if ($this->definition->hasFollowups()) {
+            foreach ($this->schema->followupNumbers() as $_) {
+                $row[] = 'YYYY-MM-DD';
+                $row[] = '';
+                $row[] = '';
+            }
+        }
+
         return [$row];
     }
 
@@ -64,7 +73,10 @@ class ImportTemplateExport implements FromArray, WithHeadings, WithStyles, Shoul
         if (filled($options)) {
             $hint = collect($options)->map(fn ($label) => (string) $label)->implode(' / ');
 
-            return mb_strlen($hint) > 120 ? mb_substr($hint, 0, 117) . '...' : $hint;
+            // Long enough to spell out every option list the modules define,
+            // so a hint never hides a value the column will then refuse. The
+            // cap only exists to stop a runaway list from bloating the row.
+            return mb_strlen($hint) > 255 ? mb_substr($hint, 0, 252) . '...' : $hint;
         }
 
         if (in_array($field, $this->definition->enumFields(), true)) {

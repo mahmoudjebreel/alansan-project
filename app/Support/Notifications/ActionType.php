@@ -70,6 +70,7 @@ final class ActionType
             'color' => 'warning',
             'priority' => 'high',
         ],
+        
     ];
 
     /**

@@ -23,6 +23,25 @@ final class ImportSchema
     /** Locales an uploaded file may have been produced in. */
     private const LOCALES = ['ar', 'en'];
 
+    /**
+     * The three columns one follow-up session occupies, as column type => the
+     * translation keys its heading may carry. The first key is the heading the
+     * export and the template write today; the rest are headings earlier
+     * versions wrote, accepted on the way in so a file downloaded before a
+     * rename still uploads.
+     */
+    private const FOLLOWUP_COLUMNS = [
+        'followup_date' => ['followup_date_n', 'followup_date_n_alt', 'followup_date_n_alt2'],
+        'followup_assess' => ['followup_assess_n', 'followup_assess_n_alt'],
+        'followup_act' => ['followup_act_n', 'followup_act_n_alt'],
+    ];
+
+    /**
+     * How far past the maximum a session heading is still recognised, purely so
+     * an over-long file can be refused by name instead of silently ignored.
+     */
+    private const FOLLOWUP_OVERFLOW_SCAN = 40;
+
     private ?array $selectOptions = null;
 
     private ?array $requiredFields = null;
@@ -54,6 +73,16 @@ final class ImportSchema
             }
         }
 
+        if ($this->definition->hasFollowups()) {
+            foreach ($this->followupNumbers() as $i) {
+                foreach (self::FOLLOWUP_COLUMNS as $keys) {
+                    // The first key is the heading of record; the rest are only
+                    // ever read, never written.
+                    $headings[] = __('fields.' . $keys[0], ['n' => $i]);
+                }
+            }
+        }
+
         return $headings;
     }
 
@@ -65,6 +94,16 @@ final class ImportSchema
     public function visitNumbers(): array
     {
         return range(1, \App\Models\FollowUpChild::MAX_VISITS);
+    }
+
+    /**
+     * Follow-up session column numbers included in the template (1..max).
+     *
+     * @return array<int>
+     */
+    public function followupNumbers(): array
+    {
+        return range(1, $this->definition->maxFollowups());
     }
 
     /**
@@ -109,6 +148,42 @@ final class ImportSchema
             }
         }
 
+        if ($this->definition->hasFollowups()) {
+            return $this->resolveFollowupHeading($heading);
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve one numbered follow-up session heading.
+     *
+     * Numbers past the allowed maximum are still recognised, and reported as an
+     * overflow: a seventh session column has to fail the upload with a message
+     * naming it, not disappear into the ignored-columns bucket.
+     *
+     * @return array{type: string, number: int}|null
+     */
+    private function resolveFollowupHeading(string $heading): ?array
+    {
+        $limit = $this->definition->maxFollowups();
+
+        foreach (range(1, $limit + self::FOLLOWUP_OVERFLOW_SCAN) as $i) {
+            foreach (self::FOLLOWUP_COLUMNS as $type => $keys) {
+                foreach ($keys as $translationKey) {
+                    foreach (self::LOCALES as $locale) {
+                        if ($heading !== $this->normalise(trans('fields.' . $translationKey, ['n' => $i], $locale))) {
+                            continue;
+                        }
+
+                        return $i > $limit
+                            ? ['type' => 'followup_overflow', 'number' => $i]
+                            : ['type' => $type, 'number' => $i];
+                    }
+                }
+            }
+        }
+
         return null;
     }
 
@@ -125,6 +200,12 @@ final class ImportSchema
     {
         if (is_string($value)) {
             $value = trim($value);
+
+            // A sheet typed by hand spells the same thing with one space and
+            // with three; squeeze them so the two do not become two spellings.
+            if (in_array($field, $this->definition->collapseWhitespace, true)) {
+                $value = trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+            }
         }
 
         if ($value === null || $value === '') {
@@ -214,6 +295,14 @@ final class ImportSchema
                 if ($needle === $this->normalise(trans('fields.' . $raw, [], $locale))) {
                     return ['ok' => true, 'value' => $raw];
                 }
+            }
+        }
+
+        // Only now: a spelling the module accepts as an alias of a real option.
+        // Checked last, so an alias can never shadow an option of the same name.
+        foreach ($this->definition->synonyms[$field] ?? [] as $alias => $stored) {
+            if ($needle === $this->normalise((string) $alias) && array_key_exists($stored, $options)) {
+                return ['ok' => true, 'value' => $stored];
             }
         }
 

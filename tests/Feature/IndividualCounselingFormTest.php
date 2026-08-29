@@ -55,7 +55,7 @@ class IndividualCounselingFormTest extends TestCase
             'mobile_number' => '0599123456',
             'muac' => 118,
             'child_age_lactated' => '6_23_months',
-            'feeding_type' => 'رضاعة طبيعية',
+            'feeding_type' => 'Exclusive Breastfeeding',
             'iycf_form_filled' => 1,
             'status' => 'under_follow_up',
         ], $overrides);
@@ -377,6 +377,295 @@ class IndividualCounselingFormTest extends TestCase
         $record->forceDelete();
 
         $this->assertDatabaseCount('individual_counseling_followups', 0);
+    }
+
+    /**
+     * Six sessions is the ceiling. Filament withdraws the add action of its
+     * own accord at that point, and refuses a seventh if one is posted anyway.
+     */
+    public function test_at_most_six_follow_up_sessions_may_be_recorded(): void
+    {
+        $this->actingAsAdmin();
+
+        $sessions = [];
+
+        foreach (range(1, IndividualCounseling::MAX_FOLLOWUP_SESSIONS) as $n) {
+            $sessions['s' . $n] = [
+                'follow_up_visit_date' => '2026-09-0' . $n,
+                'assess_and_analyze' => 'تقييم ' . $n,
+                'act' => 'إجراء ' . $n,
+            ];
+        }
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState(['followups' => $sessions]))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertCount(6, IndividualCounseling::first()->followups);
+
+        // One more than the ceiling is refused outright.
+        $sessions['s7'] = [
+            'follow_up_visit_date' => '2026-09-30',
+            'assess_and_analyze' => 'تقييم سابع',
+            'act' => 'إجراء سابع',
+        ];
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState(['mother_id_number' => '987654321', 'followups' => $sessions]))
+            ->call('create')
+            ->assertHasFormErrors(['followups']);
+
+        $this->assertSame(1, IndividualCounseling::count());
+    }
+
+    public function test_the_repeater_declares_the_six_session_ceiling(): void
+    {
+        $repeater = $this->findComponent(
+            IndividualCounselingResource::form(Schema::make())->getComponents(),
+            fn ($component): bool => $component instanceof \Filament\Forms\Components\Repeater
+                && $component->getName() === 'followups',
+        );
+
+        $this->assertNotNull($repeater, 'The follow-up sessions repeater is missing from the form.');
+        $this->assertSame(IndividualCounseling::MAX_FOLLOWUP_SESSIONS, $repeater->getMaxItems());
+    }
+
+    /**
+     * Depth-first search for the first component the callback accepts.
+     */
+    private function findComponent(iterable $components, callable $matches): mixed
+    {
+        foreach ($components as $component) {
+            if ($matches($component)) {
+                return $component;
+            }
+
+            $found = $this->findComponent($component->getDefaultChildComponents(), $matches);
+
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    // -----------------------------------------------------------------
+    // Fields and option lists
+    // -----------------------------------------------------------------
+
+    /**
+     * The base visit assesses and analyses in two fields of its own. Only a
+     * follow-up session merges them, and it does so inside the repeater.
+     */
+    public function test_the_base_visit_keeps_assess_and_analyze_apart(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState([
+                'assess' => 'الطفلة تعاني من نقص واضح في الوزن مع صعوبة في الرضاعة، وتقييم مطوّل مكتوب بحرية دون أي قائمة خيارات جاهزة.',
+                'analyze' => 'تحليل الزيارة الأساسية',
+                'act' => 'إجراء الزيارة الأساسية',
+                'followups' => [
+                    'a' => [
+                        'follow_up_visit_date' => '2026-09-01',
+                        'assess_and_analyze' => 'تقييم وتحليل مدمج',
+                        'act' => 'إجراء الجلسة',
+                    ],
+                ],
+            ]))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $record = IndividualCounseling::first();
+
+        $this->assertSame('الطفلة تعاني من نقص واضح في الوزن مع صعوبة في الرضاعة، وتقييم مطوّل مكتوب بحرية دون أي قائمة خيارات جاهزة.', $record->assess);
+        $this->assertSame('تحليل الزيارة الأساسية', $record->analyze);
+        $this->assertSame('تقييم وتحليل مدمج', $record->followups->first()->assess_and_analyze);
+
+        // The merged field belongs to the session, never to the record itself.
+        $this->assertNotContains('assess_and_analyze', $record->getFillable());
+        $this->assertNotContains('follow_up_visit_date', $record->getFillable());
+    }
+
+    /**
+     * The assessment is prose the counsellor writes, so the field has to be a
+     * textarea. It used to be a Select over a fixed list, which could not hold
+     * what actually gets recorded.
+     */
+    public function test_assess_and_analyze_are_free_text_fields(): void
+    {
+        $components = IndividualCounselingResource::form(Schema::make())->getComponents();
+
+        foreach (['assess', 'analyze'] as $field) {
+            $component = $this->findComponent(
+                $components,
+                fn ($candidate): bool => method_exists($candidate, 'getName')
+                    && $candidate->getName() === $field,
+            );
+
+            $this->assertInstanceOf(
+                \Filament\Forms\Components\Textarea::class,
+                $component,
+                "[{$field}] must be a free-text textarea.",
+            );
+        }
+    }
+
+    /**
+     * Type of feeding is a closed list of seven, not free text.
+     */
+    public function test_the_feeding_type_offers_exactly_the_seven_patterns(): void
+    {
+        $this->assertSame([
+            'Exclusive Breastfeeding',
+            'Formula Feeding',
+            'Mixed Feeding',
+            'Predominant Feeding',
+            'Complementary Feeding with BF',
+            'Complementary Feeding with Formula',
+            'Weaning and On Family Foods',
+        ], IndividualCounselingResource::feedingTypeValues());
+
+        $component = $this->findComponent(
+            IndividualCounselingResource::form(Schema::make())->getComponents(),
+            fn ($candidate): bool => method_exists($candidate, 'getName')
+                && $candidate->getName() === 'feeding_type',
+        );
+
+        $this->assertInstanceOf(\Filament\Forms\Components\Select::class, $component);
+    }
+
+    public function test_every_feeding_type_option_saves(): void
+    {
+        $this->actingAsAdmin();
+
+        foreach (IndividualCounselingResource::feedingTypeValues() as $i => $value) {
+            Livewire::test(CreateIndividualCounseling::class)
+                ->fillForm($this->validState([
+                    'feeding_type' => $value,
+                    'mother_id_number' => str_pad((string) (200000000 + $i), 9, '0'),
+                ]))
+                ->call('create')
+                ->assertHasNoFormErrors();
+        }
+
+        $this->assertSame(
+            IndividualCounselingResource::feedingTypeValues(),
+            IndividualCounseling::orderBy('id')->pluck('feeding_type')->all(),
+        );
+    }
+
+    public function test_a_feeding_type_outside_the_list_is_refused(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState(['feeding_type' => 'رضاعة طبيعية']))
+            ->call('create')
+            ->assertHasFormErrors(['feeding_type']);
+
+        $this->assertDatabaseCount('individual_counselings', 0);
+    }
+
+    /**
+     * A record saved before the list existed keeps its value and still renders;
+     * only new and re-edited data is held to the seven options.
+     */
+    public function test_an_older_record_keeps_its_unlisted_feeding_type(): void
+    {
+        $this->actingAsAdmin();
+
+        // Written straight through the model, as the old free-text form did.
+        $record = IndividualCounseling::create($this->validState(['feeding_type' => 'رضاعة طبيعية']));
+
+        $this->assertSame('رضاعة طبيعية', $record->fresh()->feeding_type);
+
+        $this->get(IndividualCounselingResource::getUrl('index'))->assertSuccessful();
+        $this->get(IndividualCounselingResource::getUrl('view', ['record' => $record]))
+            ->assertSuccessful()
+            ->assertSee('رضاعة طبيعية');
+    }
+
+    public function test_gender_is_offered_stored_and_shown_as_the_short_codes(): void
+    {
+        $this->assertSame(
+            ['M' => 'M', 'F' => 'F'],
+            IndividualCounselingResource::genderOptions(),
+        );
+
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState(['gender' => 'M']))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('M', IndividualCounseling::first()->gender);
+    }
+
+    public function test_al_helou_is_offered_as_a_shelter(): void
+    {
+        $this->assertArrayHasKey('al_helou', IndividualCounselingResource::shelterOptions());
+
+        // The existing shelters are untouched.
+        foreach (['mosaab_camp', 'mahabba', 'el_salam', 'el_qoqa'] as $shelter) {
+            $this->assertArrayHasKey($shelter, IndividualCounselingResource::shelterOptions());
+        }
+
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateIndividualCounseling::class)
+            ->fillForm($this->validState(['shelter_name' => 'al_helou']))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('al_helou', IndividualCounseling::first()->shelter_name);
+    }
+
+    /**
+     * The composite is shown as P/L — the spelling the programme's own files
+     * use — while it goes on being stored as P+L.
+     */
+    public function test_the_composite_pregnant_lactating_option_reads_as_p_slash_l(): void
+    {
+        app()->setLocale('en');
+
+        $this->assertStringStartsWith('P/L', IndividualCounselingResource::pregnantLactatingOptions()['P+L']);
+    }
+
+    /**
+     * The list, view and edit screens all have to survive the same record.
+     */
+    public function test_the_list_and_view_screens_render_a_record_with_sessions(): void
+    {
+        $this->actingAsAdmin();
+
+        $record = IndividualCounseling::create($this->validState([
+            'shelter_name' => 'al_helou',
+            'assess' => 'Malnutrition',
+            'analyze' => 'تحليل',
+            'act' => 'إجراء',
+        ]));
+
+        $record->followups()->create([
+            'sort_order' => 1,
+            'follow_up_visit_date' => '2026-09-01',
+            'assess_and_analyze' => 'تقييم وتحليل الجلسة',
+            'act' => 'إجراء الجلسة',
+        ]);
+
+        $this->get(IndividualCounselingResource::getUrl('index'))->assertSuccessful();
+
+        $this->get(IndividualCounselingResource::getUrl('view', ['record' => $record]))
+            ->assertSuccessful()
+            ->assertSee('تحليل')
+            ->assertSee('تقييم وتحليل الجلسة');
+
+        Livewire::test(EditIndividualCounseling::class, ['record' => $record->getRouteKey()])
+            ->assertSuccessful();
     }
 
     // -----------------------------------------------------------------

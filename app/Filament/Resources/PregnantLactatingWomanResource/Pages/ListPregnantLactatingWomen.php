@@ -61,9 +61,9 @@ class ListPregnantLactatingWomen extends ListRecords
 
         return PdfExport::download(
             new PregnantWomenExport($this->exportQuery()),
-            'exports.pregnant-women-pdf',
             'pregnant-lactating-women.pdf',
             __('fields.pregnant_lactating_women'),
+            'full_name_ar',
         );
     }
 

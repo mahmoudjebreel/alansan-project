@@ -5,7 +5,7 @@ namespace App\Filament\Resources\FollowUpChildResource\Pages;
 use App\Events\ExcelActionOccurred;
 use App\Support\Notifications\ActionType;
 use App\Exports\FollowUpChildrenExport;
-use App\Exports\PdfExport;
+use App\Exports\FollowUpChildPdfExport;
 use App\Filament\Resources\FollowUpChildResource;
 use App\Filament\Concerns\HasExcelImport;
 use Filament\Actions;
@@ -59,9 +59,10 @@ class ListFollowUpChildren extends ListRecords
     {
         abort_unless(auth()->user()?->can('follow_up_children.export') ?? false, 403);
 
-        return PdfExport::download(
-            new FollowUpChildrenExport($this->exportQuery()),
-            'exports.follow-up-children-pdf',
+        // This module keeps repeated visits: they print as numbered rows
+        // under the record, not as thirty-two extra columns.
+        return FollowUpChildPdfExport::download(
+            $this->exportQuery(),
             'follow-up-children.pdf',
             __('fields.follow_up_children'),
         );

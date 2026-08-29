@@ -47,7 +47,7 @@ class ListMotherToMotherSessions extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('mother_to_mother.export') ?? false, 403);
-        return PdfExport::download(new MotherToMotherExport($this->exportQuery()), 'exports.mother-to-mother-sessions-pdf', 'mother-to-mother-sessions.pdf', __('fields.mother_to_mother_sessions'));
+        return PdfExport::download(new MotherToMotherExport($this->exportQuery()), 'mother-to-mother-sessions.pdf', __('fields.mother_to_mother_sessions'), 'full_name_ar');
     }
 
     private function exportQuery()

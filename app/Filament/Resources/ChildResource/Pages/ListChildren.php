@@ -61,9 +61,9 @@ class ListChildren extends ListRecords
 
         return PdfExport::download(
             new ChildrenExport($this->exportQuery()),
-            'exports.children-pdf',
             'children.pdf',
             __('fields.children'),
+            'name',
         );
     }
 
