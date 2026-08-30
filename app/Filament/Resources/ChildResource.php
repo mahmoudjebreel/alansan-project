@@ -6,6 +6,7 @@ use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\ChildResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\Child;
+use App\Support\ChildDuplicateChecker;
 use App\Support\FilamentInfolist;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
@@ -78,15 +79,19 @@ class ChildResource extends Resource
     {
         return \Filament\Schemas\Components\Section::make(__('fields.visit_data'))
             ->schema([
+                // Derived automatically by the system (first visit, or the relapse
+                // check against the last active visit) and locked so it can never
+                // be picked by hand.
                 \Filament\Forms\Components\Select::make('visit_type')
                     ->label(__('fields.visit_type'))
                     ->options([
                         'new' => __('fields.new'),
                         'follow_up' => __('fields.follow_up'),
                     ])
-                    ->live()
-                    ->afterStateUpdated(fn (Get $get, $livewire) => static::checkDuplicateChild($get, $livewire))
-                    ->required(),
+                    ->default('new')
+                    ->disabled()
+                    ->dehydrated()
+                    ->live(),
                 \Filament\Forms\Components\TextInput::make('child_id')
                     ->label(__('fields.child_id'))
                     ->required()
@@ -99,7 +104,7 @@ class ChildResource extends Resource
                     ])
                     ->maxLength(255)
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, $livewire) => static::checkDuplicateChild($get, $livewire)),
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateChild($get, $set, $livewire)),
                 \Filament\Forms\Components\TextInput::make('name')
                     ->label(__('fields.name'))
                     ->required()
@@ -141,35 +146,45 @@ class ChildResource extends Resource
             ])->columns(2);
     }
 
-    public static function checkDuplicateChild(Get $get, $livewire): void
+    /**
+     * Recompute the locked visit type from the child ID and the MUAC entered
+     * for this visit. Only meaningful while creating a record: an existing
+     * record keeps the visit type it was saved with.
+     */
+    public static function syncVisitType(Get $get, Set $set, $livewire): void
+    {
+        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            return;
+        }
+
+        $set('visit_type', ChildDuplicateChecker::resolveVisitType($get('child_id'), $get('muac_mm')));
+    }
+
+    public static function checkDuplicateChild(Get $get, Set $set, $livewire): void
     {
         $childId = $get('child_id');
         if (blank($childId) || ! is_object($livewire) || ! method_exists($livewire, 'dispatch')) {
             return;
         }
 
-        // Include soft-deleted (trashed) records so a deleted ID still counts
-        // as existing, preventing duplicate-ID collisions when it is restored.
-        $query = Child::withTrashed()->where('child_id', $childId);
+        $ignoreRecord = (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model)
+            ? $livewire->record
+            : null;
 
-        if (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model) {
-            $query->where('id', '!=', $livewire->record->id);
-        }
+        // Soft-deleted children live in the trash and are not part of the system
+        // any more, so the default (non-trashed) scope is what decides both the
+        // duplicate alert and the visit type.
+        $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
 
-        $existing = $query->latest('date_of_reporting')->first();
+        static::syncVisitType($get, $set, $livewire);
 
+        // Rule 2: a first visit is simply "new" - no alert, nothing to confirm.
         if (! $existing) {
             return;
         }
 
         $lastVisitDate = $existing->date_of_reporting ? $existing->date_of_reporting->format('Y-m-d') : ($existing->created_at ? $existing->created_at->format('Y-m-d') : '-');
         $lastVisitType = $existing->visit_type === 'follow_up' ? 'متابعة' : 'جديد';
-
-        $currentVisitType = $get('visit_type');
-        $visitTypeWarning = null;
-        if ($currentVisitType === 'new') {
-            $visitTypeWarning = 'تنبيه: الطفل مسجل سابقاً في النظام، ولذلك لا يمكن تسجيله كـ (جديد) وستتم إضافة الزيارة كـ (متابعة).';
-        }
 
         $recordData = [
             'child_id' => $existing->child_id,
@@ -228,8 +243,8 @@ class ChildResource extends Resource
             'title' => 'هذا الطفل موجود مسبقاً في النظام',
             'last_visit_date' => $lastVisitDate,
             'last_visit_type' => $lastVisitType,
-            'visit_type_warning' => $visitTypeWarning,
-            'confirm_button_text' => 'جلب البيانات وتحويل الزيارة إلى متابعة',
+            'visit_type_warning' => null,
+            'confirm_button_text' => 'جلب البيانات وتحويل نوع الزيارة',
             'action_type' => 'fill_child',
             'index_url' => static::getUrl('index'),
             'record_data' => $recordData,
@@ -281,7 +296,12 @@ class ChildResource extends Resource
                         'max' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
                     ])
                     ->live()
-                    ->afterStateUpdated(fn (Set $set, $state) => $set('fi', Child::classifyMuac($state))),
+                    ->afterStateUpdated(function (Get $get, Set $set, $livewire, $state): void {
+                        // FI stays derived from this visit's MUAC alone, and the
+                        // relapse check then re-derives the visit type from it.
+                        $set('fi', Child::classifyMuac($state));
+                        static::syncVisitType($get, $set, $livewire);
+                    }),
                 \Filament\Forms\Components\TextInput::make('weight_kg')
                     ->label(__('fields.weight_kg'))
                     ->numeric(),

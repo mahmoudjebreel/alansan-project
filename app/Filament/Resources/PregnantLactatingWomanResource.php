@@ -7,6 +7,7 @@ use App\Filament\Resources\PregnantLactatingWomanResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\PregnantLactatingWoman;
 use App\Support\FilamentInfolist;
+use App\Support\PregnantWomanDuplicateChecker;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
 use Filament\Schemas\Schema;
@@ -76,15 +77,19 @@ class PregnantLactatingWomanResource extends Resource
     {
         return \Filament\Schemas\Components\Section::make('بيانات الزيارة')
             ->schema([
+                // Derived automatically by the system (first visit, or the
+                // pregnant/lactating switch against the last active visit) and
+                // locked so it can never be picked by hand.
                 \Filament\Forms\Components\Select::make('visit_type')
                     ->label(__('fields.visit_type'))
                     ->options([
                         'new' => __('fields.new'),
                         'follow_up' => __('fields.follow_up'),
                     ])
-                    ->live()
-                    ->afterStateUpdated(fn (Get $get, $livewire) => static::checkDuplicateMother($get, $livewire))
-                    ->required(),
+                    ->default('new')
+                    ->disabled()
+                    ->dehydrated()
+                    ->live(),
                 \Filament\Forms\Components\TextInput::make('mother_id')
                     ->label(__('fields.mother_id'))
                     ->required()
@@ -97,7 +102,7 @@ class PregnantLactatingWomanResource extends Resource
                     ])
                     ->maxLength(255)
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, $livewire) => static::checkDuplicateMother($get, $livewire)),
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateMother($get, $set, $livewire)),
                 \Filament\Forms\Components\TextInput::make('full_name_ar')
                     ->label(__('fields.full_name_ar'))
                     ->required()
@@ -139,36 +144,57 @@ class PregnantLactatingWomanResource extends Resource
             ])->columns(2);
     }
 
-    public static function checkDuplicateMother(Get $get, $livewire): void
+    /**
+     * Recompute the locked visit type from the mother ID and the
+     * pregnant/lactating status entered for this visit. Only meaningful while
+     * creating a record: an existing record keeps the visit type it was saved
+     * with.
+     */
+    public static function syncVisitType(Get $get, Set $set, $livewire): void
+    {
+        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            return;
+        }
+
+        $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType($get('mother_id'), $get('status_type')));
+    }
+
+    public static function checkDuplicateMother(Get $get, Set $set, $livewire): void
     {
         $motherId = $get('mother_id');
         if (blank($motherId) || ! is_object($livewire) || ! method_exists($livewire, 'dispatch')) {
             return;
         }
 
-        // Include soft-deleted (trashed) records so a deleted ID still counts
-        // as existing, preventing duplicate-ID collisions when it is restored.
-        $query = PregnantLactatingWoman::withTrashed()->where('mother_id', $motherId);
+        $ignoreRecord = (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model)
+            ? $livewire->record
+            : null;
 
-        if (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model) {
-            $query->where('id', '!=', $livewire->record->id);
-        }
+        // Soft-deleted records live in the trash and are not part of the system
+        // any more, so the default (non-trashed) scope is what decides both the
+        // duplicate alert and the visit type.
+        $existing = PregnantWomanDuplicateChecker::latestActiveVisit($motherId, $ignoreRecord);
 
-        $existing = $query->latest('date_of_reporting')->first();
+        static::syncVisitType($get, $set, $livewire);
 
+        // A first visit is simply "new" - no alert, nothing to confirm.
         if (! $existing) {
             return;
         }
 
         $lastVisitDate = $existing->date_of_reporting ? $existing->date_of_reporting->format('Y-m-d') : ($existing->created_at ? $existing->created_at->format('Y-m-d') : '-');
         $lastVisitType = $existing->visit_type === 'follow_up' ? 'متابعة' : 'جديد';
+        $lastStatusType = match ($existing->status_type) {
+            'pregnant' => __('fields.pregnant'),
+            'lactating' => __('fields.lactating'),
+            default => '-',
+        };
 
-        $currentVisitType = $get('visit_type');
-        $visitTypeWarning = null;
-        if ($currentVisitType === 'new') {
-            $visitTypeWarning = 'تنبيه: السيدة مسجلة سابقاً في النظام، ولذلك لا يمكن تسجيلها كـ (جديد) وستتم إضافة الزيارة كـ (متابعة).';
-        }
-
+        // The relatively stable data only. This visit's own status
+        // (pregnant/lactating), the newborn date that hangs off it, the
+        // reporting date and the measurements are deliberately left out so they
+        // stay empty and fully editable: picking the status is what settles the
+        // visit type.
         $recordData = [
             'mother_id' => $existing->mother_id,
             'full_name_ar' => $existing->full_name_ar,
@@ -180,14 +206,13 @@ class PregnantLactatingWomanResource extends Resource
             'screener_profession' => $existing->screener_profession,
             'date_of_birth' => $existing->date_of_birth ? $existing->date_of_birth->format('Y-m-d') : null,
             'age_years' => $existing->age_years,
-            'status_type' => $existing->status_type,
             'governorate' => $existing->governorate,
             'municipality' => $existing->municipality,
             'neighbourhood' => $existing->neighbourhood,
             'location' => $existing->location,
             'type_of_site' => $existing->type_of_site,
             'disability_type' => $existing->disability_type,
-            'newborn_dob' => $existing->newborn_dob ? $existing->newborn_dob->format('Y-m-d') : null,
+            'status' => $existing->status,
             'husband_id_number' => $existing->husband_id_number,
             'husband_full_name' => $existing->husband_full_name,
             'husband_phone' => $existing->husband_phone,
@@ -200,8 +225,9 @@ class PregnantLactatingWomanResource extends Resource
             'title' => 'هذه السيدة موجودة مسبقاً في النظام',
             'last_visit_date' => $lastVisitDate,
             'last_visit_type' => $lastVisitType,
-            'visit_type_warning' => $visitTypeWarning,
-            'confirm_button_text' => 'جلب البيانات وتحويل الزيارة إلى متابعة',
+            'last_status_type' => $lastStatusType,
+            'visit_type_warning' => null,
+            'confirm_button_text' => 'جلب البيانات وتحويل الزيارة',
             'action_type' => 'fill_mother',
             'index_url' => static::getUrl('index'),
             'record_data' => $recordData,
@@ -225,6 +251,9 @@ class PregnantLactatingWomanResource extends Resource
                     ->numeric()
                     ->disabled()
                     ->dehydrated(),
+                // Switching between pregnant and lactating is an admission into
+                // a different care cycle, so picking a status here re-derives
+                // the locked visit type.
                 \Filament\Forms\Components\Select::make('status_type')
                     ->label(__('fields.status_type'))
                     ->options([
@@ -232,16 +261,13 @@ class PregnantLactatingWomanResource extends Resource
                         'lactating' => __('fields.lactating'),
                     ])
                     ->required()
-                    ->live(),
+                    ->live()
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::syncVisitType($get, $set, $livewire)),
                  \Filament\Forms\Components\Select::make('status')
                     ->label(__('fields.status'))
                     ->required()
-                    ->options([
-                        'متزوجة' => 'متزوجة',
-                        'أرملة' => 'أرملة',
-                        'مطلقة' => 'مطلقة',
-                        'منفصلة' => 'منفصلة',
-                    ]),
+                    ->live()
+                    ->options(static::maritalStatusOptions()),
                 BooleanSelectField::make('is_pwd', __('fields.is_pwd'))
                     ->live(),
                 BooleanSelectField::make('is_displaced', __('fields.is_displaced')),
@@ -353,17 +379,45 @@ class PregnantLactatingWomanResource extends Resource
     //         ])->columns(2);
     // }
 
+    /**
+     * The marital status the husband data is required for.
+     */
+    public const MARRIED_STATUS = 'متزوجة';
+
+    /**
+     * @return array<string, string>
+     */
+    public static function maritalStatusOptions(): array
+    {
+        return [
+            self::MARRIED_STATUS => self::MARRIED_STATUS,
+            'أرملة' => 'أرملة',
+            'مطلقة' => 'مطلقة',
+            'منفصلة' => 'منفصلة',
+            'الزوج مفقود' => 'الزوج مفقود',
+        ];
+    }
+
+    /**
+     * Husband data is only mandatory while the mother is married. Every other
+     * marital status keeps the three fields visible and fillable, just optional.
+     */
+    public static function husbandDataIsRequired(mixed $maritalStatus): bool
+    {
+        return $maritalStatus === self::MARRIED_STATUS;
+    }
+
     protected static function getHusbandDataSection(): \Filament\Schemas\Components\Component
     {
         return \Filament\Schemas\Components\Section::make('بيانات الزوج')
             ->schema([
                 \Filament\Forms\Components\TextInput::make('husband_full_name')
                     ->label(__('fields.husband_full_name'))
-                    ->required()
+                    ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('husband_id_number')
                     ->label(__('fields.husband_id_number'))
-                    ->required()
+                    ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
                     ->numeric()
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
@@ -375,7 +429,7 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('husband_phone')
                     ->label(__('fields.husband_phone'))
                     ->tel()
-                    ->required()
+                    ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
                     ->numeric()
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([

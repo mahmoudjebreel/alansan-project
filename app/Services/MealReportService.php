@@ -126,11 +126,12 @@ class MealReportService
             $visit = $row->visit_type === 'follow_up' ? 'fu' : 'new';
             $ageMonths = $this->monthsBetween($row->date_of_birth, $row->date_of_reporting) ?? $row->age_months;
 
-            // Oedema outranks the MUAC reading: an oedematous child is counted
-            // in the Oedema column, never again under Normal/MAM/SAM.
-            $status = $row->has_oedema
-                ? 'oedema'
-                : $this->slugStatus(Child::classifyMuac($row->muac_mm));
+            // Nutrition status comes from the shared classifier, never from a
+            // copy of the thresholds. Oedema then outranks the MUAC reading:
+            // an oedematous child is counted in the Oedema column, never again
+            // under Normal/MAM/SAM.
+            $muacStatus = $this->slugStatus(Child::classifyMuac($row->muac_mm));
+            $status = $row->has_oedema ? 'oedema' : $muacStatus;
 
             if ($status === null || $ageMonths === null) {
                 continue;
@@ -138,13 +139,20 @@ class MealReportService
 
             $band = $this->childBand($ageMonths);
 
-            if ($band !== null) {
-                $this->add($days, $day, "{$band}_{$visit}_{$status}_{$sex}", $count);
+            if ($band === null) {
+                continue;
             }
 
-            // The PWD block spans the whole 6-59 range and has no Oedema column.
-            if ($row->is_pwd && $ageMonths >= 6 && $ageMonths <= 59 && $status !== 'oedema') {
-                $this->add($days, $day, "pwd_{$status}_{$sex}", $count);
+            // Visit type x age band x nutrition status x sex, all four taken
+            // from the same record.
+            $this->add($days, $day, "{$band}_{$visit}_{$status}_{$sex}", $count);
+
+            // The PWD block spans the whole 6-59 range and has no Oedema
+            // column. Bilateral pitting oedema is severe acute malnutrition
+            // whatever the tape reads, so an oedematous child is counted here
+            // under SAM rather than dropped out of the block altogether.
+            if ($row->is_pwd) {
+                $this->add($days, $day, 'pwd_' . ($row->has_oedema ? 'sam' : $muacStatus) . "_{$sex}", $count);
             }
         }
 

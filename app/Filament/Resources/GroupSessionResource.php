@@ -7,6 +7,7 @@ use App\Filament\Resources\GroupSessionResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\GroupSession;
 use App\Support\FilamentInfolist;
+use App\Support\GroupSessionDuplicateChecker;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -82,7 +83,17 @@ class GroupSessionResource extends Resource
                     ->maxLength(255),
                 Forms\Components\Select::make('locality')->label(__('fields.locality'))->options(static::localityOptions())->required(),
                 Forms\Components\Select::make('shelter_name')->label(__('fields.shelter_name'))->options(static::shelterOptions())->required(),
-                Forms\Components\Select::make('visit_type')->label(__('fields.visit_type'))->options(static::visitTypeOptions())->required(),
+                // Derived from whether the participant already has an active
+                // session, and locked so it can never be picked by hand. There is
+                // no MUAC/FI reading in this module, so there is no relapse rule:
+                // an existing active ID is simply a follow up.
+                Forms\Components\Select::make('visit_type')
+                    ->label(__('fields.visit_type'))
+                    ->options(static::visitTypeOptions())
+                    ->default('new')
+                    ->disabled()
+                    ->dehydrated()
+                    ->live(),
             ])->columns(2);
     }
 
@@ -100,7 +111,9 @@ class GroupSessionResource extends Resource
                         'numeric' => 'رقم الهوية يجب أن يكون رقماً.',
                         'regex' => 'رقم الهوية يجب أن يتكون من 9 أرقام بالضبط.',
                     ])
-                    ->maxLength(255),
+                    ->maxLength(255)
+                    ->live(onBlur: true)
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateParticipant($get, $set, $livewire)),
                 Forms\Components\TextInput::make('full_name_ar')->label(__('fields.full_name_ar'))->required()->maxLength(255),
                 Forms\Components\Select::make('category')
                     ->label(__('fields.category'))
@@ -134,6 +147,107 @@ class GroupSessionResource extends Resource
                 BooleanSelectField::make('has_gsfsh', __('fields.has_gsfsh')),
                 BooleanSelectField::make('receives_supplementary', __('fields.receives_supplementary')),
             ])->columns(2);
+    }
+
+    /**
+     * Recompute the locked visit type from the ID number. Only meaningful while
+     * creating a record: a saved session keeps the visit type it was stored with.
+     */
+    public static function syncVisitType(Get $get, Set $set, $livewire): void
+    {
+        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            return;
+        }
+
+        $set('visit_type', GroupSessionDuplicateChecker::resolveVisitType($get('id_number')));
+    }
+
+    /**
+     * Warn, while registering a participant, that the entered ID number already
+     * belongs to an active group session.
+     *
+     * Soft-deleted sessions live in the trash and are not part of the system any
+     * more, so the model's default (non-trashed) scope is what decides this: an
+     * ID that only exists in the trash raises no alert at all.
+     *
+     * Both offered actions (return to the listing, or prefill from the previous
+     * session) only make sense while creating a record, so an edit form is left
+     * completely untouched - a redirect there would silently discard the changes
+     * being made.
+     */
+    public static function checkDuplicateParticipant(Get $get, Set $set, $livewire): void
+    {
+        $idNumber = $get('id_number');
+
+        if (blank($idNumber) || ! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            return;
+        }
+
+        $existing = GroupSessionDuplicateChecker::latestActiveSession($idNumber);
+
+        static::syncVisitType($get, $set, $livewire);
+
+        // A first registration is simply "new" - no alert, nothing to fetch.
+        if (! $existing) {
+            return;
+        }
+
+        $livewire->dispatch('show-group-session-duplicate-alert', [
+            'title' => 'رقم الهوية مسجل مسبقاً في لقاءات الندوات',
+            'last_session_date' => $existing->session_date?->format('Y-m-d')
+                ?? $existing->created_at?->format('Y-m-d')
+                ?? '-',
+            'last_visit_type' => $existing->visit_type === 'follow_up' ? __('fields.follow_up') : __('fields.new'),
+            'last_session_subject' => static::sessionSubjectLabel($existing),
+            'confirm_button_text' => 'جلب البيانات',
+            'close_button_text' => 'إغلاق',
+            'index_url' => static::getUrl('index'),
+            'record_data' => static::participantDataFrom($existing),
+        ]);
+    }
+
+    /**
+     * The participant's relatively stable data, as carried over into a brand new
+     * session by the "fetch data" action.
+     *
+     * Everything that belongs to the session rather than to the person is
+     * deliberately excluded - the session date, the group number, and the
+     * subject - so the user enters them fresh for this session. In particular the
+     * subject is never copied: a participant who attended a BF Support session
+     * may well be attending a Complementary Feeding one now.
+     *
+     * @return array<string, mixed>
+     */
+    public static function participantDataFrom(GroupSession $record): array
+    {
+        return [
+            'id_number' => $record->id_number,
+            'full_name_ar' => $record->full_name_ar,
+            'locality' => $record->locality,
+            'shelter_name' => $record->shelter_name,
+            'category' => $record->category,
+            'newborn_dob' => $record->newborn_dob?->format('Y-m-d'),
+            'is_pwd' => (bool) $record->is_pwd,
+            'marital_status' => $record->marital_status,
+            'phone_number' => $record->phone_number,
+            'has_gsfsh' => (bool) $record->has_gsfsh,
+            'receives_supplementary' => (bool) $record->receives_supplementary,
+        ];
+    }
+
+    /**
+     * Human readable session subject, falling back to the free-text field when
+     * the subject was recorded as "other".
+     */
+    public static function sessionSubjectLabel(GroupSession $record): string
+    {
+        if ($record->session_subject === 'other') {
+            return filled($record->session_subject_other)
+                ? $record->session_subject_other
+                : __('fields.other');
+        }
+
+        return filled($record->session_subject) ? __('fields.' . $record->session_subject) : '-';
     }
 
     public static function infolist(Schema $schema): Schema

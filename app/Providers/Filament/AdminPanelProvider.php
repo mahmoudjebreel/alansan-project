@@ -146,6 +146,12 @@ class AdminPanelProvider extends PanelProvider
 
                         window.addEventListener("show-duplicate-visit-alert", event => {
                             const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
+                            // Only the pregnant/lactating module sends a previous
+                            // status; the row is skipped everywhere else.
+                            let statusHtml = "";
+                            if (detail.last_status_type) {
+                                statusHtml = `<p style="margin-bottom: 8px; color: #374151;"><strong>حالة الأم السابقة:</strong> <span style="color: #7c3aed; font-weight: bold;">${detail.last_status_type}</span></p>`;
+                            }
                             let warningHtml = "";
                             if (detail.visit_type_warning) {
                                 warningHtml = `<p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; border-right: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">${detail.visit_type_warning}</p>`;
@@ -156,6 +162,7 @@ class AdminPanelProvider extends PanelProvider
                                     <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
                                         <p style="margin-bottom: 8px; color: #374151;"><strong>تاريخ آخر زيارة:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.last_visit_date}</span></p>
                                         <p style="margin-bottom: 8px; color: #374151;"><strong>نوع الزيارة السابقة:</strong> <span style="color: #059669; font-weight: bold;">${detail.last_visit_type}</span></p>
+                                        ${statusHtml}
                                         ${warningHtml}
                                     </div>
                                 `,
@@ -176,6 +183,39 @@ class AdminPanelProvider extends PanelProvider
                                         Livewire.dispatch("fillMotherDataFromAlert", { data: detail.record_data });
                                     }
                                 } else if (result.dismiss === Swal.DismissReason.cancel) {
+                                    window.location.href = detail.index_url;
+                                }
+                            });
+                        });
+
+                        // Group sessions: the ID number is already registered on an
+                        // active session. Same visual style as the alert above, with
+                        // the session subject added and only two outcomes - prefill
+                        // the participant data, or leave for the listing.
+                        window.addEventListener("show-group-session-duplicate-alert", event => {
+                            const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
+                            Swal.fire({
+                                title: detail.title || "رقم الهوية مسجل مسبقاً",
+                                html: `
+                                    <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
+                                        <p style="margin-bottom: 8px; color: #374151;"><strong>تاريخ آخر جلسة:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.last_session_date}</span></p>
+                                        <p style="margin-bottom: 8px; color: #374151;"><strong>نوع الزيارة:</strong> <span style="color: #059669; font-weight: bold;">${detail.last_visit_type}</span></p>
+                                        <p style="margin-bottom: 8px; color: #374151;"><strong>اسم الجلسة:</strong> <span style="color: #7c3aed; font-weight: bold;">${detail.last_session_subject}</span></p>
+                                    </div>
+                                `,
+                                icon: "info",
+                                showCancelButton: true,
+                                confirmButtonText: detail.confirm_button_text || "جلب البيانات",
+                                cancelButtonText: detail.close_button_text || "إغلاق",
+                                confirmButtonColor: "#2563eb",
+                                cancelButtonColor: "#6b7280",
+                                reverseButtons: true,
+                                allowOutsideClick: false,
+                                allowEscapeKey: false
+                            }).then((result) => {
+                                if (result.isConfirmed) {
+                                    Livewire.dispatch("fillGroupSessionDataFromAlert", { data: detail.record_data });
+                                } else {
                                     window.location.href = detail.index_url;
                                 }
                             });
