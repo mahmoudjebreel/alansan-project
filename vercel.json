@@ -4,10 +4,12 @@
     "fluid": false,
     "functions": {
         "api/index.php": {
-            "runtime": "vercel-php@0.9.0"
+            "runtime": "vercel-php@0.9.0",
+            "excludeFiles": "{vendor/phpunit/**,vendor/fakerphp/**,vendor/mockery/**,vendor/nunomaduro/**,vendor/sebastian/**,vendor/phar-io/**,vendor/theseer/**,vendor/myclabs/**,vendor/hamcrest/**,vendor/laravel/sail/**,vendor/laravel/pail/**,vendor/mpdf/mpdf/ttfonts/Sun-*.ttf,vendor/mpdf/mpdf/ttfonts/UnBatang_0613.ttf,vendor/mpdf/mpdf/ttfonts/Aegyptus.otf,vendor/mpdf/mpdf/ttfonts/Jomolhari.ttf,vendor/mpdf/mpdf/ttfonts/Aegean.otf,vendor/mpdf/mpdf/ttfonts/Akkadian.otf,vendor/mpdf/mpdf/ttfonts/Quivira.otf,vendor/mpdf/mpdf/ttfonts/FreeSerif*.ttf,vendor/mpdf/mpdf/ttfonts/FreeSans*.ttf,vendor/mpdf/mpdf/ttfonts/FreeMono*.ttf,vendor/mpdf/mpdf/ttfonts/XB*.ttf,vendor/mpdf/mpdf/ttfonts/damase_v.2.ttf,vendor/mpdf/mpdf/ttfonts/AboriginalSansREGULAR.ttf}"
         }
     },
-    "buildCommand": "npm ci && npm run build",
+    "installCommand": "composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction && npm ci",
+    "buildCommand": "npm run build",
     "outputDirectory": "public",
     "routes": [
         {
