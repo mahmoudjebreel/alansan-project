@@ -5,6 +5,9 @@
         "build": "vite build",
         "dev": "vite"
     },
+    "engines": {
+        "node": "22.x"
+    },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.7.4",
