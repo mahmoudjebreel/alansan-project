@@ -6,6 +6,7 @@ use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\FollowUpChildResource\Pages;
 use App\Models\FollowUpChild;
 use App\Support\FilamentInfolist;
+use App\Support\MuacClassifier;
 use Filament\Forms;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -71,6 +72,11 @@ class FollowUpChildResource extends Resource
                             static::getVisitsSection(),
                         ]),
                 ])
+                // Discharge Outcome is the module's only state flag: any value
+                // other than "under follow-up" is a discharge, and a discharged
+                // record is read-only for good. Disabling the tabs cascades to
+                // every field and to the visits repeater inside them.
+                ->disabled(fn (?Model $record): bool => $record instanceof FollowUpChild && $record->isLocked())
                 ->columnSpanFull(),
         ]);
     }
@@ -147,8 +153,11 @@ class FollowUpChildResource extends Resource
                 Forms\Components\DatePicker::make('discharge_date')
                     ->label(__('fields.discharge_date'))
                     ->rules(['date']),
+                // The state flag of the whole record: "under follow-up" keeps it
+                // open, anything else discharges and locks it.
                 Forms\Components\Select::make('discharge_outcome')
                     ->label(__('fields.discharge_outcome'))
+                    ->default(FollowUpChild::ACTIVE_OUTCOME)
                     ->options(static::dischargeOutcomeOptions()),
                 Forms\Components\Textarea::make('notes')
                     ->label(__('fields.notes'))
@@ -181,9 +190,21 @@ class FollowUpChildResource extends Resource
                         Forms\Components\TextInput::make('muac')
                             ->label(__('fields.muac'))
                             ->numeric()
-                            ->required(),
+                            ->required()
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(fn (Set $set, $state) => $set('fi', MuacClassifier::classify($state))),
+                        // Always derived from this visit's MUAC by the shared
+                        // classifier, never typed in: the visit model writes the
+                        // stored column itself, so nothing is dehydrated here.
+                        Forms\Components\TextInput::make('fi')
+                            ->label(__('fields.fi'))
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->extraInputAttributes(fn (Get $get): array => MuacClassifier::inputAttributes(
+                                MuacClassifier::classify($get('muac')),
+                            )),
                     ])
-                    ->columns(2)
+                    ->columns(3)
                     ->itemNumbers()
                     ->itemLabel(fn (array $state): ?string => filled($state['visit_date'] ?? null)
                         ? __('fields.visit_date') . ': ' . $state['visit_date']
@@ -192,6 +213,9 @@ class FollowUpChildResource extends Resource
                     ->maxItems(FollowUpChild::MAX_VISITS)
                     ->defaultItems(1)
                     ->addActionLabel(__('fields.add_visit'))
+                    // "+ Add Visit" and the per-row delete need no flag of their
+                    // own: a disabled repeater is neither addable nor deletable,
+                    // and the tabs above disable it on a discharged record.
                     ->orderColumn('visit_number')
                     ->reorderable(false)
                     ->deleteAction(fn (\Filament\Actions\Action $action) => $action->requiresConfirmation()),
@@ -229,8 +253,11 @@ class FollowUpChildResource extends Resource
                                 ->label(__('fields.visit_number')),
                             FilamentInfolist::date('visit_date'),
                             FilamentInfolist::text('muac'),
+                            FilamentInfolist::text('fi')
+                                ->badge()
+                                ->color(fn (?string $state): string => MuacClassifier::color($state)),
                         ])
-                        ->columns(3),
+                        ->columns(4),
                 ]),
         ]);
     }
@@ -283,12 +310,21 @@ class FollowUpChildResource extends Resource
                     ->label(__('fields.latest_muac'))
                     ->state(fn (FollowUpChild $record): mixed => $record->latest_muac)
                     ->badge()
-                    ->color(fn ($state): string => match (\App\Models\Child::classifyMuac($state)) {
-                        'SAM' => 'danger',
-                        'MAM' => 'warning',
-                        'Normal' => 'success',
-                        default => 'gray',
-                    }),
+                    ->color(fn ($state): string => MuacClassifier::color(MuacClassifier::classify($state))),
+                Tables\Columns\TextColumn::make('latest_fi')
+                    ->label(__('fields.latest_fi'))
+                    ->state(fn (FollowUpChild $record): ?string => $record->latest_fi)
+                    ->badge()
+                    ->color(fn (?string $state): string => MuacClassifier::color($state)),
+                // Reads the discharge outcome, which is the module's only
+                // state flag - there is no separate "disabled" column.
+                Tables\Columns\TextColumn::make('record_state')
+                    ->label(__('fields.record_state'))
+                    ->state(fn (FollowUpChild $record): string => $record->isLocked()
+                        ? __('fields.record_locked')
+                        : __('fields.record_active'))
+                    ->badge()
+                    ->color(fn (FollowUpChild $record): string => $record->isLocked() ? 'gray' : 'info'),
             ])
             ->defaultSort('admission_date', 'desc')
             ->filters([

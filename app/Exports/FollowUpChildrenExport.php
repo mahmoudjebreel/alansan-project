@@ -40,9 +40,12 @@ class FollowUpChildrenExport extends AbstractTableExport
     {
         $headings = parent::headings();
 
+        // FI is appended after each visit's existing two columns, so every
+        // column that was already there keeps its name and its position.
         foreach (range(1, $this->maxVisits()) as $i) {
             $headings[] = __('fields.visit_date_n', ['n' => $i]);
             $headings[] = __('fields.visit_muac_n', ['n' => $i]);
+            $headings[] = __('fields.visit_fi_n', ['n' => $i]);
         }
 
         return $headings;
@@ -58,6 +61,7 @@ class FollowUpChildrenExport extends AbstractTableExport
             $visit = $visits->get($i);
             $row[] = $visit?->visit_date?->format('Y-m-d');
             $row[] = $visit?->muac;
+            $row[] = $visit?->fi;
         }
 
         return $row;

@@ -174,7 +174,16 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
             }
 
             if ($column['type'] === 'field') {
-                $cast = $this->schema->castValue($column['field'], $value);
+                $normalised = $this->normaliseValue($column['field'], $value);
+
+                if (! $normalised['ok']) {
+                    $messages[] = $normalised['message'];
+                    $rejected[] = $column['field'];
+
+                    continue;
+                }
+
+                $cast = $this->schema->castValue($column['field'], $normalised['value']);
 
                 if (! $cast['ok']) {
                     $messages[] = $cast['message'];
@@ -264,6 +273,25 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
             'visits' => $visits,
             'followups' => $followups,
         ];
+    }
+
+    /**
+     * Translate one uploaded cell into the module's own vocabulary, before any
+     * casting or validation sees it.
+     *
+     * A module that accepts its Select columns written in more than one
+     * language overrides this to fold every accepted spelling onto the single
+     * value it stores. The step is deliberately separate from castValue() and
+     * from validateRow(): those rules are unchanged, they simply receive a
+     * value that has already been settled.
+     *
+     * The default is to change nothing at all.
+     *
+     * @return array{ok: bool, value?: mixed, message?: string}
+     */
+    protected function normaliseValue(string $field, mixed $value): array
+    {
+        return ['ok' => true, 'value' => $value];
     }
 
     /**

@@ -306,6 +306,23 @@ return [
     'age_months_only' => ':months شهر',
     'visit_date_n' => 'تاريخ الزيارة :n',
     'visit_muac_n' => 'مواك الزيارة :n',
+    'visit_fi_n' => 'مؤشر FI للزيارة :n',
+    'latest_fi' => 'آخر مؤشر FI',
+
+    // Follow Up Child — حالة السجل (مشتقة من نتيجة التخريج وحدها)
+    'record_state' => 'حالة السجل',
+    'record_active' => 'نشط',
+    'record_locked' => 'مغلق',
+    'record_locked_hint' => 'سجل مُخرَّج (:outcome) — للعرض فقط، لا يمكن تعديله أو إضافة زيارات إليه.',
+    'record_locked_title' => 'السجل مغلق',
+    'record_locked_body' => 'تم تخريج هذا الطفل، ولم يعد السجل قابلاً للتعديل.',
+
+    // الانتقال التلقائي بين موديولي الأطفال ومتابعة الطفل
+    'referral_created_title' => 'تمت إحالة الطفل إلى برنامج متابعة الأطفال',
+    'referral_created_body' => 'أُنشئ سجل متابعة جديد بحالة قبول :fi، وسُجِّلت القراءة كزيارة أولى. لم يُحفظ أي سجل في جدول الأطفال لهذه القراءة.',
+    'discharge_cured_title' => 'تم تخريج الطفل (شُفي)',
+    'discharge_cured_body' => 'أُغلق سجل المتابعة، وأُنشئ سجل جديد في موديول الأطفال بنوع زيارة "جديد".',
+    'discharge_incomplete_body' => 'أُغلق سجل المتابعة، لكن تعذّر إنشاء سجل في موديول الأطفال لنقص بيانات إلزامية (الجنس أو الاسم أو رقم الهوية).',
 
     // Excel import
     'import_excel' => 'استيراد Excel',
@@ -323,6 +340,7 @@ return [
     'import_required' => ':field مطلوب.',
     'import_invalid_boolean' => 'قيمة غير صالحة للحقل :field — يجب أن تكون :allowed.',
     'import_invalid_option' => 'قيمة غير صالحة للحقل :field — يجب أن تكون إحدى القيم: :allowed.',
+    'import_invalid_value' => 'قيمة \':value\' غير صالحة للحقل \':field\'. القيم المقبولة: :allowed.',
     'import_unreadable_option' => 'تعذّر التحقق من قيمة الحقل :field — قائمة الخيارات المعتمدة لهذا الحقل غير متاحة، فلم يتم قبول القيمة. يرجى إبلاغ مسؤول النظام.',
     'import_invalid_date' => 'تاريخ غير صالح للحقل :field.',
     'import_invalid_number' => 'الحقل :field يجب أن يكون رقماً.',

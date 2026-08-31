@@ -40,6 +40,7 @@ class FollowUpChildPdfExport
             'columns' => [
                 __('fields.visit_date'),
                 __('fields.muac'),
+                __('fields.fi'),
             ],
             'empty' => __('fields.no_visits'),
             // The relation already orders by visit_number, so the row number
@@ -49,6 +50,7 @@ class FollowUpChildPdfExport
                 ->map(fn ($visit): array => [
                     $visit->visit_date?->format('Y-m-d'),
                     $visit->muac,
+                    $visit->fi,
                 ])
                 ->all(),
         ];
