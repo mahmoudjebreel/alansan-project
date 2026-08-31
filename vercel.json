@@ -5,6 +5,7 @@
         }
     },
     "buildCommand": "npm ci && npm run build",
+    "outputDirectory": "public",
     "routes": [
         {
             "src": "/build/(.*)",
