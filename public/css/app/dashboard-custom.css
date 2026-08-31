@@ -1,0 +1,26 @@
+/*
+ * Global dashboard styling tweaks.
+ *
+ * Published to public/css/app/custom.css by `php artisan filament:assets`
+ * (run automatically through `filament:upgrade` on composer install).
+ */
+
+/*
+ * Hide the native spinner (up/down stepper) arrows on number inputs.
+ * Filament renders `TextInput::make(...)->numeric()` as `<input type="number">`,
+ * so this single rule covers every numeric field in every module. Purely
+ * visual: the input keeps its number type, so numeric-only entry and all
+ * existing validation rules are untouched.
+ */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+
+/* Firefox */
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
