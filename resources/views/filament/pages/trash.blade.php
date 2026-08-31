@@ -10,6 +10,7 @@
             'individual_counseling' => 'warning',
             'mother_to_mother' => 'success',
             'group_session' => 'gray',
+            'follow_up_child' => 'danger',
         ];
     @endphp
 

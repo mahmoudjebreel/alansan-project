@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\Child;
+use App\Models\FollowUpChild;
 use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\MotherToMotherSession;
@@ -80,6 +81,15 @@ class Trash extends Page
                 'model' => GroupSession::class,
                 'label' => 'الجلسات الجماعية',
                 'name' => fn (Model $record): ?string => $record->full_name_ar,
+                'identifier' => fn (Model $record): ?string => $record->id_number,
+            ],
+            // Follow Up Child is soft-deletable and its list has a bulk Delete,
+            // but it was missing from this registry: a deleted record was
+            // invisible everywhere and could never be restored.
+            'follow_up_child' => [
+                'model' => FollowUpChild::class,
+                'label' => 'متابعة الأطفال',
+                'name' => fn (Model $record): ?string => $record->child_name,
                 'identifier' => fn (Model $record): ?string => $record->id_number,
             ],
         ];

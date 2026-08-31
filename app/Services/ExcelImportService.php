@@ -4,8 +4,15 @@ namespace App\Services;
 
 use App\Imports\AbstractTableImport;
 use App\Imports\ImportDefinition;
+use App\Models\Child;
 use App\Models\FollowUpChild;
+use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
+use App\Models\PregnantLactatingWoman;
+use App\Support\ChildDuplicateChecker;
+use App\Support\GroupSessionDuplicateChecker;
+use App\Support\PregnantWomanDuplicateChecker;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
@@ -102,6 +109,11 @@ final class ExcelImportService
         );
 
         $model->fill($attributes);
+
+        // Whatever the file said about a derived column is discarded here, the
+        // same way the Create form derives it rather than accepting it.
+        $this->applyDerivedValues($model);
+
         $model->save();
 
         if ($visits !== [] && $model instanceof FollowUpChild) {
@@ -127,6 +139,91 @@ final class ExcelImportService
                 ]);
             }
         }
+    }
+
+    /**
+     * Re-derive the values the system owns, so an uploaded cell can never set
+     * them. Each module is handled entirely on its own terms: nothing here is
+     * shared between them beyond the dispatch itself.
+     */
+    private function applyDerivedValues(Model $model): void
+    {
+        match (true) {
+            $model instanceof Child => $this->deriveChild($model),
+            $model instanceof PregnantLactatingWoman => $this->derivePregnantLactatingWoman($model),
+            $model instanceof GroupSession => $this->deriveGroupSession($model),
+            $model instanceof IndividualCounseling => $this->deriveIndividualCounseling($model),
+            default => null,
+        };
+    }
+
+    /**
+     * Children: age in months from the date of birth, and the locked visit type
+     * from the relapse rule (this MUAC's FI against the last active visit's).
+     * FI itself is already re-derived by the model's MUAC mutator.
+     */
+    private function deriveChild(Child $model): void
+    {
+        if (filled($model->date_of_birth)) {
+            $model->age_months = $this->monthsSince($model->date_of_birth);
+        }
+
+        $model->visit_type = ChildDuplicateChecker::resolveVisitType(
+            $model->child_id,
+            $model->muac_mm,
+        );
+    }
+
+    /**
+     * Pregnant / lactating women: age in years from the date of birth, and the
+     * locked visit type from the pregnant/lactating switch against the last
+     * active visit.
+     */
+    private function derivePregnantLactatingWoman(PregnantLactatingWoman $model): void
+    {
+        if (filled($model->date_of_birth)) {
+            $model->age_years = $this->yearsSince($model->date_of_birth);
+        }
+
+        $model->visit_type = PregnantWomanDuplicateChecker::resolveVisitType(
+            $model->mother_id,
+            $model->status_type,
+        );
+    }
+
+    /**
+     * Group sessions: the locked visit type is simply whether this ID number
+     * already has an active session. There is no MUAC here, so no relapse rule.
+     */
+    private function deriveGroupSession(GroupSession $model): void
+    {
+        $model->visit_type = GroupSessionDuplicateChecker::resolveVisitType($model->id_number);
+    }
+
+    /**
+     * Individual counseling: both ages come from their dates of birth. The two
+     * visit-type columns are programme fields chosen per session, not derived,
+     * so they are left exactly as the file supplied them.
+     */
+    private function deriveIndividualCounseling(IndividualCounseling $model): void
+    {
+        if (filled($model->child_dob)) {
+            $model->age_months = IndividualCounseling::ageInMonths($model->child_dob);
+        }
+
+        if (filled($model->mother_dob)) {
+            $model->mother_age_years = IndividualCounseling::ageInYears($model->mother_dob);
+        }
+    }
+
+    private function monthsSince(mixed $date): int
+    {
+        return (int) Carbon::parse($date)->diffInMonths(Carbon::now());
+    }
+
+    private function yearsSince(mixed $date): int
+    {
+        return (int) Carbon::parse($date)->diffInYears(Carbon::now());
     }
 
     /**

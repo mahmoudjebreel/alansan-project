@@ -119,8 +119,12 @@ class IndividualCounselingFormTest extends TestCase
 
         Livewire::test(CreateIndividualCounseling::class)
             ->fillForm([
-                'child_dob' => now()->subMonths(14)->format('Y-m-d'),
-                'mother_dob' => now()->subYears(31)->format('Y-m-d'),
+                // NoOverflow: on the 29th-31st, subMonths() rolls into the
+                // following month (31 Aug - 14 months = 31 Jun -> 1 Jul), which
+                // makes the completed-month count one short and the assertion
+                // fail purely because of the day the suite happens to run.
+                'child_dob' => now()->subMonthsNoOverflow(14)->format('Y-m-d'),
+                'mother_dob' => now()->subYearsNoOverflow(31)->format('Y-m-d'),
             ])
             ->assertFormSet([
                 'age_months' => 14,

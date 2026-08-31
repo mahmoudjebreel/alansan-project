@@ -104,7 +104,12 @@ class GroupSessionResource extends Resource
                 Forms\Components\TextInput::make('id_number')
                     ->label(__('fields.id_number'))
                     ->required()
-                    ->numeric()
+                    // No ->numeric() here: it renders a number input, whose
+                    // state is normalised as a number, so a leading zero was
+                    // silently dropped on save (0591234567 stored as
+                    // 591234567) and the row then failed its own 10/9-digit
+                    // rule on the next edit. The regex below already
+                    // restricts the value to digits.
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهوية مطلوب.',
@@ -136,7 +141,6 @@ class GroupSessionResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهاتف مطلوب.',

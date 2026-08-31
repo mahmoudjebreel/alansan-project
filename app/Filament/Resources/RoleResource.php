@@ -91,9 +91,15 @@ class RoleResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
+                    // The first parameter used to be type-hinted
+                    // `Filament\Support\Enums\ActionSize` with no leading
+                    // backslash, which resolves against this namespace to
+                    // App\Filament\Resources\Filament\Support\Enums\ActionSize
+                    // - a class that does not exist, so the bulk delete threw
+                    // instead of running. Nothing here needs that argument.
                     \Filament\Actions\DeleteBulkAction::make()
-                        ->action(function (Filament\Support\Enums\ActionSize $action, \Illuminate\Database\Eloquent\Collection $records) {
-                            $records->each(function ($record) {
+                        ->action(function (\Illuminate\Database\Eloquent\Collection $records): void {
+                            $records->each(function ($record): void {
                                 if ($record->name !== 'Super Admin') {
                                     $record->delete();
                                 }

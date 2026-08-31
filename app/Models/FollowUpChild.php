@@ -41,12 +41,20 @@ class FollowUpChild extends Model
     }
 
     /**
-     * Remove related visits whenever the child record is deleted (soft or force).
+     * Remove related visits only when the child record is destroyed for good.
+     *
+     * Visits are not soft-deletable, so deleting them on an ordinary (soft)
+     * delete destroyed every recorded MUAC reading permanently: restoring the
+     * child from the Trash brought back an empty record. A soft delete now
+     * leaves the visits untouched, and only a force delete clears them - which
+     * the foreign key would do on its own anyway.
      */
     protected static function booted(): void
     {
         static::deleting(function (FollowUpChild $child): void {
-            $child->visits()->delete();
+            if ($child->isForceDeleting()) {
+                $child->visits()->delete();
+            }
         });
     }
 

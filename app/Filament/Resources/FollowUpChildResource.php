@@ -79,10 +79,12 @@ class FollowUpChildResource extends Resource
     {
         return \Filament\Schemas\Components\Section::make(__('fields.follow_up_child_data'))
             ->schema([
+                // No ->numeric(): a number input drops a leading zero, so an
+                // ID such as 012345678 was stored as 12345678 and then failed
+                // its own nine-digit rule. The regex already restricts it.
                 Forms\Components\TextInput::make('id_number')
                     ->label(__('fields.id_number'))
                     ->required()
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهوية مطلوب.',
@@ -117,10 +119,12 @@ class FollowUpChildResource extends Resource
                     ->disabled()
                     ->dehydrated()
                     ->maxLength(255),
+                // A tel input rather than a numeric one, so a leading zero
+                // survives: ->numeric() normalised the state as a number and
+                // stored 0591234567 as 591234567.
                 Forms\Components\TextInput::make('mobile_number')
                     ->label(__('fields.mobile_number'))
                     ->tel()
-                    ->numeric()
                     ->required()
                     ->maxLength(255),
                 Forms\Components\TextInput::make('shelter_name')

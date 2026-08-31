@@ -93,7 +93,12 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('mother_id')
                     ->label(__('fields.mother_id'))
                     ->required()
-                    ->numeric()
+                    // No ->numeric() here: it renders a number input, whose
+                    // state is normalised as a number, so a leading zero was
+                    // silently dropped on save (0591234567 stored as
+                    // 591234567) and the row then failed its own 10/9-digit
+                    // rule on the next edit. The regex below already
+                    // restricts the value to digits.
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهوية مطلوب.',
@@ -111,7 +116,6 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهاتف مطلوب.',
@@ -127,11 +131,17 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.implementing_partner'))
                     ->default('SCI')
                     ->maxLength(255),
+                // "Not before today" is a data-entry rule for a visit being
+                // registered now. Applied on edit as well, it made every record
+                // older than today unsaveable: reopening yesterday's visit to
+                // correct a phone number failed validation on a date the user
+                // never touched. Both the picker limit and the rule are
+                // therefore scoped to the create form.
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
                     ->default(now())
-                    ->minDate(now()->startOfDay())
-                    ->rules(['after_or_equal:today'])
+                    ->minDate(fn (string $operation): ?\Carbon\Carbon => $operation === 'create' ? now()->startOfDay() : null)
+                    ->rules(fn (string $operation): array => $operation === 'create' ? ['after_or_equal:today'] : [])
                     ->validationMessages([
                         'required' => 'تاريخ التقرير مطلوب.',
                         'after_or_equal' => 'لا يمكنك اختيار تاريخ قبل اليوم.',
@@ -159,21 +169,26 @@ class PregnantLactatingWomanResource extends Resource
         $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType($get('mother_id'), $get('status_type')));
     }
 
+    /**
+     * Warn, while registering a woman, that the entered ID already belongs to
+     * an active visit.
+     *
+     * Both offered actions (return to the listing, or prefill from the previous
+     * visit) only make sense while creating a record, so an edit form is left
+     * completely untouched - a redirect there would silently discard the changes
+     * being made, and the prefill event has no listener on the edit page at all.
+     */
     public static function checkDuplicateMother(Get $get, Set $set, $livewire): void
     {
         $motherId = $get('mother_id');
-        if (blank($motherId) || ! is_object($livewire) || ! method_exists($livewire, 'dispatch')) {
+        if (blank($motherId) || ! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
             return;
         }
-
-        $ignoreRecord = (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model)
-            ? $livewire->record
-            : null;
 
         // Soft-deleted records live in the trash and are not part of the system
         // any more, so the default (non-trashed) scope is what decides both the
         // duplicate alert and the visit type.
-        $existing = PregnantWomanDuplicateChecker::latestActiveVisit($motherId, $ignoreRecord);
+        $existing = PregnantWomanDuplicateChecker::latestActiveVisit($motherId);
 
         static::syncVisitType($get, $set, $livewire);
 
@@ -302,8 +317,8 @@ class PregnantLactatingWomanResource extends Resource
                     ->validationMessages([
                         'required' => 'منتصف العضد مطلوب.',
                         'integer' => 'منتصف العضد يجب أن يكون رقماً صحيحاً.',
-                        'min' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
-                        'max' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
+                        'min' => 'منتصف العضد يجب أن يكون بين 1 و 250.',
+                        'max' => 'منتصف العضد يجب أن يكون بين 1 و 250.',
                     ])
                     ->live()
                     ->afterStateUpdated(fn (Set $set, $state) => $set('fi', PregnantLactatingWoman::classifyMuac($state))),
@@ -418,7 +433,6 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('husband_id_number')
                     ->label(__('fields.husband_id_number'))
                     ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
                         'required' => 'رقم هوية الزوج مطلوب.',
@@ -430,7 +444,6 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.husband_phone'))
                     ->tel()
                     ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
                         'required' => 'رقم هاتف الزوج مطلوب.',
@@ -530,6 +543,10 @@ class PregnantLactatingWomanResource extends Resource
             'has_oedema',
             'is_family_pwd',
             'organization',
+            // Required by SoftDeletes::trashed(): without it every row looks
+            // live, so the Restore / Force delete row actions - which gate on
+            // trashed() - never appear under the "Trashed" filter.
+            'deleted_at',
         ]);
     }
 
@@ -607,8 +624,17 @@ class PregnantLactatingWomanResource extends Resource
                     ]),
                 Tables\Filters\SelectFilter::make('governorate')
                     ->label(__('fields.governorate')),
+                // Was declared without options, so it rendered as an empty
+                // Select that could never filter anything. These are the four
+                // values the form stores.
                 Tables\Filters\SelectFilter::make('type_of_site')
-                    ->label(__('fields.type_of_site')),
+                    ->label(__('fields.type_of_site'))
+                    ->options([
+                        'El Salam Camp' => __('fields.el_salam_camp'),
+                        'Mossab Camp' => __('fields.mosaab_camp'),
+                        'Mahabba Camp' => __('fields.mahabba'),
+                        'El Qoqa' => __('fields.el_qoqa'),
+                    ]),
                 Tables\Filters\SelectFilter::make('is_displaced')
                     ->label(__('fields.is_displaced'))
                     ->options([

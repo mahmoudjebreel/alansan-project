@@ -95,7 +95,12 @@ class ChildResource extends Resource
                 \Filament\Forms\Components\TextInput::make('child_id')
                     ->label(__('fields.child_id'))
                     ->required()
-                    ->numeric()
+                    // No ->numeric() here: it renders a number input, whose
+                    // state is normalised as a number, so a leading zero was
+                    // silently dropped on save (0591234567 stored as
+                    // 591234567) and the row then failed its own 10/9-digit
+                    // rule on the next edit. The regex below already
+                    // restricts the value to digits.
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
                         'required' => 'رقم هوية الطفل مطلوب.',
@@ -113,7 +118,6 @@ class ChildResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
                         'required' => 'رقم الهاتف مطلوب.',
@@ -129,11 +133,17 @@ class ChildResource extends Resource
                     ->label(__('fields.implementing_partner'))
                     ->default('SCI')
                     ->maxLength(255),
+                // "Not before today" is a data-entry rule for a visit being
+                // registered now. Applied on edit as well, it made every record
+                // older than today unsaveable: reopening yesterday's visit to
+                // correct a phone number failed validation on a date the user
+                // never touched. Both the picker limit and the rule are
+                // therefore scoped to the create form.
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
                     ->default(now())
-                    ->minDate(now()->startOfDay())
-                    ->rules(['after_or_equal:today'])
+                    ->minDate(fn (string $operation): ?\Carbon\Carbon => $operation === 'create' ? now()->startOfDay() : null)
+                    ->rules(fn (string $operation): array => $operation === 'create' ? ['after_or_equal:today'] : [])
                     ->validationMessages([
                         'required' => 'تاريخ التقرير مطلوب.',
                         'after_or_equal' => 'لا يمكنك اختيار تاريخ قبل اليوم.',
@@ -160,21 +170,26 @@ class ChildResource extends Resource
         $set('visit_type', ChildDuplicateChecker::resolveVisitType($get('child_id'), $get('muac_mm')));
     }
 
+    /**
+     * Warn, while registering a child, that the entered ID already belongs to
+     * an active visit.
+     *
+     * Both offered actions (return to the listing, or prefill from the previous
+     * visit) only make sense while creating a record, so an edit form is left
+     * completely untouched - a redirect there would silently discard the changes
+     * being made, and the prefill event has no listener on the edit page at all.
+     */
     public static function checkDuplicateChild(Get $get, Set $set, $livewire): void
     {
         $childId = $get('child_id');
-        if (blank($childId) || ! is_object($livewire) || ! method_exists($livewire, 'dispatch')) {
+        if (blank($childId) || ! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
             return;
         }
-
-        $ignoreRecord = (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model)
-            ? $livewire->record
-            : null;
 
         // Soft-deleted children live in the trash and are not part of the system
         // any more, so the default (non-trashed) scope is what decides both the
         // duplicate alert and the visit type.
-        $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
+        $existing = ChildDuplicateChecker::latestActiveVisit($childId);
 
         static::syncVisitType($get, $set, $livewire);
 
@@ -644,6 +659,10 @@ class ChildResource extends Resource
             'visit_type',
             'organization',
             'muac_mm',
+            // Required by SoftDeletes::trashed(): without it every row looks
+            // live, so the Restore / Force delete row actions - which gate on
+            // trashed() - never appear under the "Trashed" filter.
+            'deleted_at',
         ]);
     }
 
@@ -764,13 +783,16 @@ class ChildResource extends Resource
                         'new' => __('fields.new'),
                         'follow_up' => __('fields.follow_up'),
                     ]),
+                // The same four values the form stores. The previous list
+                // (host_family / camp / shelter / other) is not what this column
+                // ever holds, so the filter could never match a single row.
                 Tables\Filters\SelectFilter::make('type_of_site')
                     ->label(__('fields.type_of_site'))
                     ->options([
-                        'host_family' => __('fields.host_family'),
-                        'camp' => __('fields.camp'),
-                        'shelter' => __('fields.shelter'),
-                        'other' => __('fields.other'),
+                        'El Salam Camp' => __('fields.el_salam_camp'),
+                        'Mossab Camp' => __('fields.mosaab_camp'),
+                        'Mahabba Camp' => __('fields.mahabba'),
+                        'El Qoqa' => __('fields.el_qoqa'),
                     ]),
                 Tables\Filters\Filter::make('is_displaced')
                     ->label(__('fields.is_displaced'))

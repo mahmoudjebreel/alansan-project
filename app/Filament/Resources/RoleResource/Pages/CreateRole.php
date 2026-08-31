@@ -11,7 +11,11 @@ class CreateRole extends CreateRecord
 {
     protected static string $resource = RoleResource::class;
 
-    protected function afterSave(): void
+    /**
+     * afterCreate(), not afterSave(): CreateRecord never calls afterSave() -
+     * that hook belongs to EditRecord - so the flush written here never ran.
+     */
+    protected function afterCreate(): void
     {
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
