@@ -67,11 +67,11 @@ class AdminPanelProvider extends PanelProvider
             ->userMenuItems([
                 MenuItem::make('locale_en')
                     ->label('EN')
-                    ->url(url('/locale/en'))
+                    ->url('/locale/en')
                     ->sort(0),
                 MenuItem::make('locale_ar')
                     ->label('العربية')
-                    ->url(url('/locale/ar'))
+                    ->url('/locale/ar')
                     ->sort(1),
             ])
             ->renderHook(

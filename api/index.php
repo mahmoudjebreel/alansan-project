@@ -32,6 +32,8 @@ foreach ([
 foreach ([
     'LARAVEL_STORAGE_PATH' => $storagePath,
     'VIEW_COMPILED_PATH' => $storagePath.'/framework/views',
+    'APP_PACKAGES_CACHE' => $storagePath.'/framework/cache/packages.php',
+    'APP_SERVICES_CACHE' => $storagePath.'/framework/cache/services.php',
 ] as $key => $value) {
     $_ENV[$key] = $_SERVER[$key] = $value;
     putenv("{$key}={$value}");
