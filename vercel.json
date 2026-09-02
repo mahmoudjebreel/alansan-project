@@ -13,12 +13,16 @@
     "outputDirectory": "public",
     "routes": [
         {
-            "src": "/build/(.*)",
-            "dest": "/build/$1"
+            "src": "/(build|css|fonts|js|storage|vendor)/(.*)",
+            "dest": "/$1/$2"
         },
         {
             "src": "/favicon.ico",
-            "dest": "/favicon.ico"
+            "dest": "/favicon.svg"
+        },
+        {
+            "src": "/favicon.svg",
+            "dest": "/favicon.svg"
         },
         {
             "src": "/robots.txt",

@@ -27,6 +27,8 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    private const FALLBACK_SITE_NAME = 'أرض الإنسان - نظام المسح التغذوي';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -36,7 +38,8 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->databaseNotifications()
             ->profile(EditProfile::class, isSimple: false)
-            ->brandName(fn (): string => app(GeneralSettings::class)->site_name)
+            ->brandName(fn (): string => self::siteName())
+            ->favicon(secure_asset('favicon.svg'))
             ->colors(fn (): array => [
                 'primary' => Color::hex(app(GeneralSettings::class)->primary_color),
                 'danger' => Color::Rose,
@@ -238,5 +241,16 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ]);
+    }
+
+    private static function siteName(): string
+    {
+        $siteName = app(GeneralSettings::class)->site_name;
+
+        if (str_contains($siteName, '╪') || str_contains($siteName, '┘')) {
+            return self::FALLBACK_SITE_NAME;
+        }
+
+        return $siteName ?: self::FALLBACK_SITE_NAME;
     }
 }
