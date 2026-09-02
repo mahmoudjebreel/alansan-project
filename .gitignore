@@ -22,3 +22,5 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
