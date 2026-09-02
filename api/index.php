@@ -2,6 +2,11 @@
 
 $storagePath = sys_get_temp_dir().'/laravel-storage';
 
+foreach (['APP_SERVICES_CACHE', 'APP_PACKAGES_CACHE'] as $key) {
+    unset($_ENV[$key], $_SERVER[$key]);
+    putenv($key);
+}
+
 foreach ([
     $storagePath,
     $storagePath.'/app',
@@ -13,7 +18,7 @@ foreach ([
     $storagePath.'/framework/views',
     $storagePath.'/logs',
 ] as $path) {
-    if (! is_dir($path)) {
+    if (! file_exists($path)) {
         mkdir($path, 0777, true);
     }
 }
