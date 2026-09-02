@@ -2,7 +2,13 @@
 
 $storagePath = sys_get_temp_dir().'/laravel-storage';
 
-foreach (['APP_SERVICES_CACHE', 'APP_PACKAGES_CACHE'] as $key) {
+foreach ([
+    'APP_CONFIG_CACHE',
+    'APP_EVENTS_CACHE',
+    'APP_PACKAGES_CACHE',
+    'APP_ROUTES_CACHE',
+    'APP_SERVICES_CACHE',
+] as $key) {
     unset($_ENV[$key], $_SERVER[$key]);
     putenv($key);
 }
@@ -26,9 +32,6 @@ foreach ([
 foreach ([
     'LARAVEL_STORAGE_PATH' => $storagePath,
     'VIEW_COMPILED_PATH' => $storagePath.'/framework/views',
-    'APP_CONFIG_CACHE' => $storagePath.'/framework/cache/config.php',
-    'APP_ROUTES_CACHE' => $storagePath.'/framework/cache/routes.php',
-    'APP_EVENTS_CACHE' => $storagePath.'/framework/cache/events.php',
 ] as $key => $value) {
     $_ENV[$key] = $_SERVER[$key] = $value;
     putenv("{$key}={$value}");
