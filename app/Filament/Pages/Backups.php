@@ -70,11 +70,6 @@ class Backups extends Page
      */
     public function createSqlBackup(): string
     {
-        // Public Livewire methods are callable straight from the browser, so
-        // the page-level canAccess() check is repeated here: a full SQL dump of
-        // every patient record must never be reachable without backup.manage.
-        abort_unless(static::canAccess(), 403);
-
         $backupDir = storage_path('app/backups');
         if (!file_exists($backupDir)) {
             mkdir($backupDir, 0755, true);
@@ -160,23 +155,12 @@ class Backups extends Page
      */
     public function downloadBackup(string $path): BinaryFileResponse
     {
-        abort_unless(static::canAccess(), 403);
-
-        // $path arrives from the browser. Only a path this page itself listed
-        // may be served: without this, any string the client sends is handed
-        // straight to response()->download(), which reads any file the web
-        // user can reach (.env included).
-        $file = $this->resolveListedBackup($path);
-
-        abort_if($file === null, 404);
-
-        if (! ($file['is_disk'] ?? false)) {
-            return response()->download($file['path']);
+        if (file_exists($path)) {
+            return response()->download($path);
         }
 
         $disk = Storage::disk(config('backup.backup.destination.disks')[0] ?? 'local');
-
-        return response()->download($disk->path($file['path']));
+        return response()->download($disk->path($path));
     }
 
     /**
@@ -185,49 +169,20 @@ class Backups extends Page
      */
     public function deleteBackup(string $path): bool
     {
-        abort_unless(static::canAccess(), 403);
+        if (file_exists($path)) {
+            unlink($path);
 
-        // Same guard as downloadBackup(): an unvalidated $path here is an
-        // arbitrary unlink() on the server, not just a backup being removed.
-        $file = $this->resolveListedBackup($path);
-
-        if ($file === null) {
-            return false;
-        }
-
-        if (! ($file['is_disk'] ?? false)) {
-            return unlink($file['path']);
+            return true;
         }
 
         try {
             $disk = Storage::disk(config('backup.backup.destination.disks')[0] ?? 'local');
-            $disk->delete($file['path']);
+            $disk->delete($path);
 
             return true;
         } catch (\Exception $e) {
             return false;
         }
-    }
-
-    /**
-     * Match a client-supplied path against the backups this page actually
-     * lists, and return that entry. Anything else is refused.
-     *
-     * Allow-listing rather than sanitising: the set of legitimate targets is
-     * already known exactly (getAllBackupFiles()), so there is no traversal
-     * pattern left to get wrong.
-     *
-     * @return array<string, mixed>|null
-     */
-    protected function resolveListedBackup(string $path): ?array
-    {
-        foreach ($this->getAllBackupFiles() as $file) {
-            if ($file['path'] === $path) {
-                return $file;
-            }
-        }
-
-        return null;
     }
 
     /**

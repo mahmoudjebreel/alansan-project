@@ -28,16 +28,10 @@ class WomenStatusDistributionChart extends ChartWidget
 
         return [
             'datasets' => [[
-                // Three slices, one per stored status. Without the combined
-                // one those women would silently drop out of the chart.
-                'data' => [
-                    (int) ($counts['pregnant'] ?? 0),
-                    (int) ($counts['lactating'] ?? 0),
-                    (int) ($counts['pregnant_lactating'] ?? 0),
-                ],
-                'backgroundColor' => ['#f59e0b', '#10b981', '#6366f1'],
+                'data' => [(int) ($counts['pregnant'] ?? 0), (int) ($counts['lactating'] ?? 0)],
+                'backgroundColor' => ['#f59e0b', '#10b981'],
             ]],
-            'labels' => [__('fields.pregnant'), __('fields.lactating'), __('fields.pregnant_lactating')],
+            'labels' => [__('fields.pregnant'), __('fields.lactating')],
         ];
     }
 

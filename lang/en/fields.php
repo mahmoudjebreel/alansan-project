@@ -99,7 +99,6 @@ return [
     'female' => 'Female',
     'pregnant' => 'Pregnant',
     'lactating' => 'Lactating',
-    'pregnant_lactating' => 'Pregnant + Breastfeeding',
     'government' => 'Government',
     'unrwa' => 'UNRWA',
     'other' => 'Other',
@@ -305,23 +304,6 @@ return [
     'age_months_only' => ':months m',
     'visit_date_n' => 'Visit :n Date',
     'visit_muac_n' => 'Visit :n MUAC',
-    'visit_fi_n' => 'Visit :n FI',
-    'latest_fi' => 'Latest FI',
-
-    // Follow Up Child - record state, derived from the discharge outcome alone
-    'record_state' => 'Record State',
-    'record_active' => 'Active',
-    'record_locked' => 'Locked',
-    'record_locked_hint' => 'Discharged record (:outcome) - read-only; it cannot be edited and no visit can be added.',
-    'record_locked_title' => 'Record locked',
-    'record_locked_body' => 'This child has been discharged, so the record can no longer be edited.',
-
-    // Automatic transfer between the Children and Follow Up Child modules
-    'referral_created_title' => 'Child referred to the follow-up programme',
-    'referral_created_body' => 'A new follow-up record was created, admitted with :fi, and this reading was stored as its first visit. No Children row was written for it.',
-    'discharge_cured_title' => 'Child discharged (Cured)',
-    'discharge_cured_body' => 'The follow-up record is now locked, and a new Children visit was created with visit type "New".',
-    'discharge_incomplete_body' => 'The follow-up record is now locked, but no Children record could be created because required details (sex, name or ID number) are missing.',
 
     // Excel import
     'import_excel' => 'Import Excel',
@@ -339,7 +321,6 @@ return [
     'import_required' => ':field is required.',
     'import_invalid_boolean' => 'Invalid value for :field — must be :allowed.',
     'import_invalid_option' => 'Invalid value for :field — must be one of: :allowed.',
-    'import_invalid_value' => 'Value \':value\' is not valid for field \':field\'. Accepted values: :allowed.',
     'import_unreadable_option' => 'Could not verify the value for :field — its list of accepted options is unavailable, so the value was not accepted. Please report this to the system administrator.',
     'import_invalid_date' => 'Invalid date for :field.',
     'import_invalid_number' => ':field must be a number.',

@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use App\Support\MuacClassifier;
 use App\Traits\NotifiesSuperAdminOnChange;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -36,7 +35,7 @@ class Child extends Model
         'original_address', 'has_family_disability', 'disability_cause',
         'disability_cause_other', 'has_injured_after_oct7', 'injured_count',
         'has_unaccompanied_children', 'unaccompanied_children_count',
-        'has_released_children', 'source_follow_up_child_id',
+        'has_released_children',
     ];
 
     protected $casts = [
@@ -75,15 +74,20 @@ class Child extends Model
 
     /**
      * Classify a child's MUAC measurement using the program thresholds.
-     *
-     * Kept as this module's own entry point - every existing caller still
-     * works unchanged - but the thresholds themselves now live in one shared
-     * classifier, so the Follow Up Child module reads a measurement exactly
-     * the same way.
      */
     public static function classifyMuac(mixed $muacMm): ?string
     {
-        return MuacClassifier::classify($muacMm);
+        if ($muacMm === null || $muacMm === '') {
+            return null;
+        }
+
+        $muacMm = (float) $muacMm;
+
+        return match (true) {
+            $muacMm <= 115 => 'SAM',
+            $muacMm < 125 => 'MAM',
+            $muacMm >= 125 =>  'Normal',
+        };
     }
 
     /**

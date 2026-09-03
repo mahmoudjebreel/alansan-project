@@ -105,6 +105,10 @@ return [
         ),
     ],
 
+    'providers' => Illuminate\Support\ServiceProvider::defaultProviders()
+        ->merge(require __DIR__.'/../bootstrap/providers.php')
+        ->toArray(),
+
     /*
     |--------------------------------------------------------------------------
     | Maintenance Mode Driver

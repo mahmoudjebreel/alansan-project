@@ -66,7 +66,9 @@
             "dev-master": "12.x-dev"
         },
         "laravel": {
-            "dont-discover": []
+            "dont-discover": [
+                "laravel/pail"
+            ]
         }
     },
     "config": {

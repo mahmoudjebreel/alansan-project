@@ -47,36 +47,23 @@ class PregnantWomanVisitTypeAndHusbandTest extends TestCase
 
     public function test_first_visit_is_always_new(): void
     {
-        foreach (['pregnant', 'lactating', 'pregnant_lactating'] as $statusType) {
+        foreach (['pregnant', 'lactating'] as $statusType) {
             $this->assertSame('new', PregnantWomanDuplicateChecker::resolveVisitType('987654321', $statusType));
         }
     }
 
-    // Rule 3 - switching status is a new care cycle, with one exception:
-    // pregnant + breastfeeding -> pregnant only is the same pregnancy carrying
-    // on (only the breastfeeding stopped), so it stays a follow up.
+    // Rule 3 - switching between pregnant and lactating is a new care cycle.
 
     /**
-     * Every combination of the three statuses, nine in all.
-     *
      * @return array<string, array{0: string, 1: string, 2: string}>
      */
     public static function statusSwitchMatrix(): array
     {
         return [
-            'pregnant to pregnant stays a follow up' => ['pregnant', 'pregnant', 'follow_up'],
             'pregnant to lactating is a new cycle' => ['pregnant', 'lactating', 'new'],
-            'pregnant to combined is a new cycle' => ['pregnant', 'pregnant_lactating', 'new'],
-
-            'lactating to lactating stays a follow up' => ['lactating', 'lactating', 'follow_up'],
             'lactating to pregnant is a new cycle' => ['lactating', 'pregnant', 'new'],
-            'lactating to combined is a new cycle' => ['lactating', 'pregnant_lactating', 'new'],
-
-            'combined to combined stays a follow up' => ['pregnant_lactating', 'pregnant_lactating', 'follow_up'],
-            // The exception: the pregnancy did not change, only the feeding.
-            'combined to pregnant stays a follow up' => ['pregnant_lactating', 'pregnant', 'follow_up'],
-            // Not covered by the exception: no pregnancy is being carried on.
-            'combined to lactating is a new cycle' => ['pregnant_lactating', 'lactating', 'new'],
+            'pregnant to pregnant stays a follow up' => ['pregnant', 'pregnant', 'follow_up'],
+            'lactating to lactating stays a follow up' => ['lactating', 'lactating', 'follow_up'],
         ];
     }
 

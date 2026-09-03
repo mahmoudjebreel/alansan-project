@@ -27,6 +27,8 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    private const FALLBACK_SITE_NAME = 'أرض الإنسان - نظام المسح التغذوي';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -36,7 +38,8 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->databaseNotifications()
             ->profile(EditProfile::class, isSimple: false)
-            ->brandName(fn (): string => app(GeneralSettings::class)->site_name)
+            ->brandName(fn (): string => self::siteName())
+            ->favicon(secure_asset('favicon.svg'))
             ->colors(fn (): array => [
                 'primary' => Color::hex(app(GeneralSettings::class)->primary_color),
                 'danger' => Color::Rose,
@@ -67,11 +70,11 @@ class AdminPanelProvider extends PanelProvider
             ->userMenuItems([
                 MenuItem::make('locale_en')
                     ->label('EN')
-                    ->url(url('/locale/en'))
+                    ->url('/locale/en')
                     ->sort(0),
                 MenuItem::make('locale_ar')
                     ->label('العربية')
-                    ->url(url('/locale/ar'))
+                    ->url('/locale/ar')
                     ->sort(1),
             ])
             ->renderHook(
@@ -220,80 +223,6 @@ class AdminPanelProvider extends PanelProvider
                                 }
                             });
                         });
-
-                        // Children -> Follow Up Child. A screening that comes back
-                        // MAM or SAM is a referral decision, so nothing is written
-                        // until it is confirmed: cancelling leaves the form exactly
-                        // as typed, so a mistyped MUAC can simply be corrected.
-                        window.addEventListener("show-child-referral-alert", event => {
-                            const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
-                            const nameHtml = detail.child_name
-                                ? `<p style="margin-bottom: 8px; color: #374151;"><strong>الطفل:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.child_name}</span></p>`
-                                : "";
-                            Swal.fire({
-                                title: `⚠️ تم اكتشاف حالة ${detail.fi}`,
-                                html: `
-                                    <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
-                                        ${nameHtml}
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>قياس منتصف العضد:</strong> <span style="color: #dc2626; font-weight: bold;">${detail.muac} مم</span></p>
-                                        <p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; border-right: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">هل تريد إحالة هذا الطفل إلى برنامج متابعة الأطفال؟</p>
-                                    </div>
-                                `,
-                                icon: "warning",
-                                showCancelButton: true,
-                                confirmButtonText: "نعم، أحِله",
-                                cancelButtonText: "إلغاء",
-                                confirmButtonColor: "#dc2626",
-                                cancelButtonColor: "#6b7280",
-                                reverseButtons: true,
-                                allowOutsideClick: false,
-                                allowEscapeKey: false
-                            }).then((result) => {
-                                if (result.isConfirmed) {
-                                    Livewire.dispatch("confirmChildReferral");
-                                }
-                                // Cancelled: nothing is saved anywhere, and the
-                                // form stays on screen untouched.
-                            });
-                        });
-
-                        // Follow Up Child -> Children. The visit is already saved
-                        // either way; only the discharge itself is being confirmed.
-                        window.addEventListener("show-follow-up-discharge-alert", event => {
-                            const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
-                            const nameHtml = detail.child_name
-                                ? `<p style="margin-bottom: 8px; color: #374151;"><strong>الطفل:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.child_name}</span></p>`
-                                : "";
-                            const dateHtml = detail.visit_date
-                                ? `<p style="margin-bottom: 8px; color: #374151;"><strong>تاريخ الزيارة:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.visit_date}</span></p>`
-                                : "";
-                            Swal.fire({
-                                title: "✅ تحسّنت حالة الطفل إلى Normal",
-                                html: `
-                                    <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
-                                        ${nameHtml}
-                                        ${dateHtml}
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>قياس منتصف العضد:</strong> <span style="color: #059669; font-weight: bold;">${detail.muac} مم</span></p>
-                                        <p style="margin-top: 12px; padding: 10px; background-color: #f0fdf4; border-right: 4px solid #22c55e; color: #166534; font-weight: bold; border-radius: 4px; font-size: 14px;">هل تريد تخريجه (Cured) وإعادته لموديول الأطفال؟</p>
-                                    </div>
-                                `,
-                                icon: "success",
-                                showCancelButton: true,
-                                confirmButtonText: "نعم، أخرِّجه",
-                                cancelButtonText: "إبقاء تحت المتابعة",
-                                confirmButtonColor: "#16a34a",
-                                cancelButtonColor: "#6b7280",
-                                reverseButtons: true,
-                                allowOutsideClick: false,
-                                allowEscapeKey: false
-                            }).then((result) => {
-                                if (result.isConfirmed) {
-                                    Livewire.dispatch("confirmFollowUpDischarge");
-                                } else {
-                                    Livewire.dispatch("keepUnderFollowUp");
-                                }
-                            });
-                        });
                     </script>
                 ', ['primaryColor' => app(GeneralSettings::class)->primary_color])
             )
@@ -312,5 +241,16 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ]);
+    }
+
+    private static function siteName(): string
+    {
+        $siteName = app(GeneralSettings::class)->site_name;
+
+        if (str_contains($siteName, '╪') || str_contains($siteName, '┘')) {
+            return self::FALLBACK_SITE_NAME;
+        }
+
+        return $siteName ?: self::FALLBACK_SITE_NAME;
     }
 }

@@ -315,45 +315,8 @@ final class ImportSchema
         ];
     }
 
-    /**
-     * Read one date cell.
-     *
-     * Blankness is decided here and nowhere else, because the shapes a blank
-     * date cell arrives in are not the empty string castValue() already
-     * catches. A column the sheet formats as a date but nobody fills in comes
-     * back as a hard 0, as a false, or as spacing that trim() does not touch -
-     * a no-break space, a zero-width mark, a BOM left by an export. All of
-     * them used to be parsed: 0 became 1970-01-01, and a no-break space became
-     * *today*, silently, in a NOT NULL reporting date. None of them is a date,
-     * so each is read as blank.
-     *
-     * Reading them as blank does not make any column optional. A blank value
-     * is handed to validateRow(), which refuses the row through the existing
-     * required-field rule for every NOT NULL column; only a genuinely optional
-     * column such as newborn_dob keeps the null.
-     */
     private function castDate(string $field, mixed $value): array
     {
-        // A reader that hands back a real date object has already done the
-        // parsing, and stringifying it would only throw.
-        if ($value instanceof \DateTimeInterface) {
-            return ['ok' => true, 'value' => Carbon::instance($value)->startOfDay()];
-        }
-
-        // A cell formatted as a date and left empty: 0, false, or spacing of
-        // any width. Not a date, and not this method's call to refuse.
-        if (is_bool($value)) {
-            return ['ok' => true, 'value' => null];
-        }
-
-        if (is_numeric($value) && (float) $value === 0.0) {
-            return ['ok' => true, 'value' => null];
-        }
-
-        if (is_string($value) && preg_replace('/[\p{Z}\s\x{200B}-\x{200F}\x{FEFF}]+/u', '', $value) === '') {
-            return ['ok' => true, 'value' => null];
-        }
-
         try {
             if (is_numeric($value)) {
                 return ['ok' => true, 'value' => Carbon::instance(ExcelDate::excelToDateTimeObject((float) $value))->startOfDay()];

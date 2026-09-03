@@ -1,0 +1,36 @@
+{
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "framework": null,
+    "fluid": false,
+    "functions": {
+        "api/index.php": {
+            "runtime": "vercel-php@0.9.0",
+            "excludeFiles": "{node_modules/**,vendor/mpdf/mpdf/ttfonts/**}"
+        }
+    },
+    "installCommand": "npm ci",
+    "buildCommand": "npm run build",
+    "outputDirectory": "public",
+    "routes": [
+        {
+            "src": "/(build|css|fonts|js|storage|vendor)/(.*)",
+            "dest": "/$1/$2"
+        },
+        {
+            "src": "/favicon.ico",
+            "dest": "/favicon.svg"
+        },
+        {
+            "src": "/favicon.svg",
+            "dest": "/favicon.svg"
+        },
+        {
+            "src": "/robots.txt",
+            "dest": "/robots.txt"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/api/index.php"
+        }
+    ]
+}

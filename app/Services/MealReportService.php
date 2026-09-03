@@ -73,6 +73,8 @@ class MealReportService
                 // Breast-milk-substitute support and violations are not recorded.
                 'bms0_5_new_male', 'bms0_5_new_female', 'bms0_5_fu_male', 'bms0_5_fu_female',
                 'bms_violations',
+                // group_sessions.category has no grandmother / reproductive-age value.
+                'part_grandmother_new', 'part_grandmother_fu', 'part_wra_new', 'part_wra_fu',
             ],
             MealReportLayout::SHEET_CMAM => array_values(array_unique($cmam)),
         ];
@@ -276,16 +278,10 @@ class MealReportService
             $count = (int) $row->aggregate_count;
             $visit = $row->visit_type === 'follow_up' ? 'fu' : 'new';
 
-            // Grandmothers and women of reproductive age became selectable
-            // categories when the column was widened; the report kept treating
-            // them as "not captured", so those participants only ever reached
-            // the total and their own four columns stayed blank.
             $category = match ($row->category) {
                 'pregnant' => 'pregnant',
                 'caregiver_child_under_6_months' => 'cg_infant',
                 'caregiver_child_6_23_months' => 'cg_child',
-                'grandmothers' => 'grandmother',
-                'reproductive_age' => 'wra',
                 default => null,
             };
 

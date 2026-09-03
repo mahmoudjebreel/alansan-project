@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Support\MuacClassifier;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,20 +20,10 @@ class FollowUpChild extends Model
 
     public const MAX_VISITS = 16;
 
-    /**
-     * The one discharge outcome that leaves a record open.
-     *
-     * Discharge Outcome is the module's only state flag: as long as it holds
-     * this value the record is active and fully editable; any other value is a
-     * discharge, and a discharged record is locked for good.
-     */
-    public const ACTIVE_OUTCOME = 'under_follow_up';
-
     protected $fillable = [
         'id_number', 'child_name', 'sex', 'dob', 'age', 'mobile_number',
         'shelter_name', 'governorate', 'causes_of_admission', 'admitted_with',
         'admission_date', 'discharge_date', 'discharge_outcome', 'notes',
-        'source_child_visit_id',
     ];
 
     protected $casts = [
@@ -52,20 +41,12 @@ class FollowUpChild extends Model
     }
 
     /**
-     * Remove related visits only when the child record is destroyed for good.
-     *
-     * Visits are not soft-deletable, so deleting them on an ordinary (soft)
-     * delete destroyed every recorded MUAC reading permanently: restoring the
-     * child from the Trash brought back an empty record. A soft delete now
-     * leaves the visits untouched, and only a force delete clears them - which
-     * the foreign key would do on its own anyway.
+     * Remove related visits whenever the child record is deleted (soft or force).
      */
     protected static function booted(): void
     {
         static::deleting(function (FollowUpChild $child): void {
-            if ($child->isForceDeleting()) {
-                $child->visits()->delete();
-            }
+            $child->visits()->delete();
         });
     }
 
@@ -147,37 +128,6 @@ class FollowUpChild extends Model
         return Attribute::make(
             get: fn (): mixed => $this->visits->last()?->muac,
         );
-    }
-
-    /**
-     * The most recent recorded visit, by visit number.
-     */
-    public function latestVisit(): ?FollowUpChildVisit
-    {
-        return $this->visits->last();
-    }
-
-    /**
-     * FI of the most recent recorded visit.
-     */
-    protected function latestFi(): Attribute
-    {
-        return Attribute::make(
-            get: fn (): ?string => MuacClassifier::classify($this->latestVisit()?->muac),
-        );
-    }
-
-    /**
-     * Whether this record has been discharged and is therefore locked.
-     *
-     * A blank outcome is an older record that predates the outcome ever being
-     * filled in: it counts as still under follow-up, so nothing that used to
-     * be editable becomes read-only on upgrade.
-     */
-    public function isLocked(): bool
-    {
-        return filled($this->discharge_outcome)
-            && $this->discharge_outcome !== self::ACTIVE_OUTCOME;
     }
 
     /**
