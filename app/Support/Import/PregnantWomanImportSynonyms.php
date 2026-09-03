@@ -38,12 +38,17 @@ final class PregnantWomanImportSynonyms
      */
     private const FIELDS = [
         // ------------------------------------------------------------------
-        // حامل / مرضع — stored as the enum values pregnant | lactating.
+        // حامل / مرضع — stored as the enum values pregnant | lactating |
+        // pregnant_lactating (pregnant and breastfeeding at the same time).
         // ------------------------------------------------------------------
         'status_type' => [
             'values' => [
                 'حامل' => 'pregnant',
                 'Pregnant' => 'pregnant',
+                // The one-letter codes the field workbooks are actually filled
+                // in with. Unambiguous within this column: no other spelling
+                // here is a single P or a single L.
+                'P' => 'pregnant',
 
                 'مرضع' => 'lactating',
                 'مرضعة' => 'lactating',
@@ -52,8 +57,34 @@ final class PregnantWomanImportSynonyms
                 'Breast Feeding' => 'lactating',
                 'Breast-feeding' => 'lactating',
                 'Lactating' => 'lactating',
+                'L' => 'lactating',
+
+                'حامل + مرضع' => 'pregnant_lactating',
+                'حامل ومرضع' => 'pregnant_lactating',
+                'حامل و مرضع' => 'pregnant_lactating',
+                'حامل + مرضعة' => 'pregnant_lactating',
+                'حامل + مرضعه' => 'pregnant_lactating',
+                'حامل/مرضع' => 'pregnant_lactating',
+                'Pregnant + Breastfeeding' => 'pregnant_lactating',
+                'Pregnant and Breastfeeding' => 'pregnant_lactating',
+                'Pregnant + Breast Feeding' => 'pregnant_lactating',
+                'Pregnant + Lactating' => 'pregnant_lactating',
+                'Pregnant and Lactating' => 'pregnant_lactating',
+                'Pregnant/Lactating' => 'pregnant_lactating',
+                'P+L' => 'pregnant_lactating',
+                'P/L' => 'pregnant_lactating',
+                'PL' => 'pregnant_lactating',
+                // The same code with the two letters the other way round, which
+                // the workbooks use just as often.
+                'L+P' => 'pregnant_lactating',
+                'L/P' => 'pregnant_lactating',
+                'LP' => 'pregnant_lactating',
+                'pregnant_lactating' => 'pregnant_lactating',
             ],
-            'display' => ['حامل', 'مرضع', 'Pregnant', 'Breastfeeding', 'Lactating'],
+            'display' => [
+                'حامل', 'مرضع', 'حامل + مرضع',
+                'Pregnant', 'Breastfeeding', 'Lactating', 'Pregnant + Breastfeeding',
+            ],
         ],
 
         // ------------------------------------------------------------------
@@ -171,10 +202,23 @@ final class PregnantWomanImportSynonyms
                 'زوج مفقود' => 'الزوج مفقود',
                 'Husband Missing' => 'الزوج مفقود',
                 'Missing Husband' => 'الزوج مفقود',
+
+                'مهجورة' => 'مهجورة',
+                'مهجوره' => 'مهجورة',
+                'Abandoned' => 'مهجورة',
+
+                // Stored without the shadda, the way the other six options and
+                // the workbooks themselves are written; the shadda spelling is
+                // accepted on the way in.
+                'معلقة' => 'معلقة',
+                'معلّقة' => 'معلقة',
+                'معلقه' => 'معلقة',
+                'معلّقه' => 'معلقة',
+                'Pending' => 'معلقة',
             ],
             'display' => [
-                'متزوجة', 'أرملة', 'مطلقة', 'منفصلة', 'الزوج مفقود',
-                'Married', 'Widowed', 'Divorced', 'Separated', 'Husband Missing',
+                'متزوجة', 'أرملة', 'مطلقة', 'منفصلة', 'الزوج مفقود', 'مهجورة', 'معلقة',
+                'Married', 'Widowed', 'Divorced', 'Separated', 'Husband Missing', 'Abandoned', 'Pending',
             ],
         ],
     ];

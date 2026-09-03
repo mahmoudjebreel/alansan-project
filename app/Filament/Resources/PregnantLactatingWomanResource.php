@@ -202,6 +202,7 @@ class PregnantLactatingWomanResource extends Resource
         $lastStatusType = match ($existing->status_type) {
             'pregnant' => __('fields.pregnant'),
             'lactating' => __('fields.lactating'),
+            'pregnant_lactating' => __('fields.pregnant_lactating'),
             default => '-',
         };
 
@@ -266,14 +267,16 @@ class PregnantLactatingWomanResource extends Resource
                     ->numeric()
                     ->disabled()
                     ->dehydrated(),
-                // Switching between pregnant and lactating is an admission into
-                // a different care cycle, so picking a status here re-derives
-                // the locked visit type.
+                // Switching status is an admission into a different care cycle,
+                // so picking a status here re-derives the locked visit type.
+                // The one exception (combined -> pregnant only) lives in
+                // PregnantWomanDuplicateChecker::resolveVisitType().
                 \Filament\Forms\Components\Select::make('status_type')
                     ->label(__('fields.status_type'))
                     ->options([
                         'pregnant' => __('fields.pregnant'),
                         'lactating' => __('fields.lactating'),
+                        'pregnant_lactating' => __('fields.pregnant_lactating'),
                     ])
                     ->required()
                     ->live()
@@ -293,7 +296,7 @@ class PregnantLactatingWomanResource extends Resource
                     ->maxLength(255),
                 \Filament\Forms\Components\DatePicker::make('newborn_dob')
                     ->label('تاريخ آخر مولود')
-                    ->visible(fn (Get $get): bool => in_array($get('status_type'), ['pregnant', 'lactating'])),
+                    ->visible(fn (Get $get): bool => in_array($get('status_type'), ['pregnant', 'lactating', 'pregnant_lactating'])),
 
             ])->columns(2);
 
@@ -410,6 +413,8 @@ class PregnantLactatingWomanResource extends Resource
             'مطلقة' => 'مطلقة',
             'منفصلة' => 'منفصلة',
             'الزوج مفقود' => 'الزوج مفقود',
+            'مهجورة' => 'مهجورة',
+            'معلقة' => 'معلقة',
         ];
     }
 
@@ -573,6 +578,7 @@ class PregnantLactatingWomanResource extends Resource
                     ->color(fn (string $state): string => match ($state) {
                         'pregnant' => 'warning',
                         'lactating' => 'success',
+                        'pregnant_lactating' => 'info',
                         default => 'gray',
                     })
                     ->searchable()
@@ -621,6 +627,7 @@ class PregnantLactatingWomanResource extends Resource
                     ->options([
                         'pregnant' => __('fields.pregnant'),
                         'lactating' => __('fields.lactating'),
+                        'pregnant_lactating' => __('fields.pregnant_lactating'),
                     ]),
                 Tables\Filters\SelectFilter::make('governorate')
                     ->label(__('fields.governorate')),

@@ -49,9 +49,10 @@ class PregnantWomanDuplicateChecker
      * 1. No active (non-deleted) record with the same mother ID -> "new"; this
      *    is her first visit.
      * 2. An active record exists -> compare this visit's pregnant/lactating
-     *    status against the last active one. Switching between the two is an
-     *    admission into a completely different care cycle and therefore a new
-     *    entry; staying in the same status continues the follow-up loop.
+     *    status against the last active one. Switching status is an admission
+     *    into a completely different care cycle and therefore a new entry;
+     *    staying in the same status continues the follow-up loop.
+     * 3. One explicit exception sits on top of that general rule, see below.
      *
      * While the status of the current visit is still empty (the field is
      * deliberately left blank after prefilling from the alert), the visit stays
@@ -66,6 +67,16 @@ class PregnantWomanDuplicateChecker
         }
 
         if (blank($currentStatusType) || blank($previous->status_type)) {
+            return 'follow_up';
+        }
+
+        // The one explicit exception to the general rule: she was pregnant and
+        // breastfeeding at once, and is now only pregnant. That is the same
+        // pregnancy carrying on - only the breastfeeding stopped, no new
+        // pregnancy was entered - so her follow-up loop is not broken.
+        // Every other move out of the combined status (including going to
+        // breastfeeding only) stays a new care cycle.
+        if ($previous->status_type === 'pregnant_lactating' && $currentStatusType === 'pregnant') {
             return 'follow_up';
         }
 

@@ -99,6 +99,7 @@ return [
     'female' => 'أنثى',
     'pregnant' => 'حامل',
     'lactating' => 'مرضع',
+    'pregnant_lactating' => 'حامل + مرضع',
     'government' => 'حكومي',
     'unrwa' => 'وكالة (أونروا)',
     'other' => 'أخرى',

@@ -99,6 +99,7 @@ return [
     'female' => 'Female',
     'pregnant' => 'Pregnant',
     'lactating' => 'Lactating',
+    'pregnant_lactating' => 'Pregnant + Breastfeeding',
     'government' => 'Government',
     'unrwa' => 'UNRWA',
     'other' => 'Other',
