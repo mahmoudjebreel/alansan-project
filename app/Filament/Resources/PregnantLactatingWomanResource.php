@@ -156,17 +156,28 @@ class PregnantLactatingWomanResource extends Resource
 
     /**
      * Recompute the locked visit type from the mother ID and the
-     * pregnant/lactating status entered for this visit. Only meaningful while
-     * creating a record: an existing record keeps the visit type it was saved
-     * with.
+     * pregnant/lactating status entered for this visit.
+     *
+     * This runs while creating a record and while editing one: correcting a
+     * wrongly picked status on an existing visit has to re-derive the visit
+     * type too, otherwise the row keeps a value its own status contradicts.
+     * The recomputation stays silent in both cases - no confirmation, no alert.
+     *
+     * While editing, the record being edited is itself already stored, so it is
+     * excluded from the lookup for the last active visit; comparing a record
+     * against itself would always report an unchanged status.
      */
     public static function syncVisitType(Get $get, Set $set, $livewire): void
     {
-        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
-            return;
-        }
+        $currentRecord = $livewire instanceof \Filament\Resources\Pages\EditRecord
+            ? $livewire->getRecord()
+            : null;
 
-        $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType($get('mother_id'), $get('status_type')));
+        $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType(
+            $get('mother_id'),
+            $get('status_type'),
+            $currentRecord,
+        ));
     }
 
     /**

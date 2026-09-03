@@ -28,14 +28,17 @@ final class ChildFollowUpTransfer
      * the same screening in both modules would double it in every report.
      *
      * @param  array<string, mixed>  $childData  Validated Children form data.
+     * @param  Child|null  $sourceChild  The Children row this admission was
+     *                                   raised from, when one was written -
+     *                                   only the first-ever visit writes one.
      */
-    public static function admit(array $childData, string $fi): FollowUpChild
+    public static function admit(array $childData, string $fi, ?Child $sourceChild = null): FollowUpChild
     {
         $childId = $childData['child_id'] ?? null;
         $readingDate = static::date($childData['date_of_reporting'] ?? null) ?? Carbon::today();
         $dob = static::date($childData['date_of_birth'] ?? null);
 
-        return DB::transaction(function () use ($childData, $childId, $fi, $readingDate, $dob): FollowUpChild {
+        return DB::transaction(function () use ($childData, $childId, $fi, $readingDate, $dob, $sourceChild): FollowUpChild {
             $followUpChild = FollowUpChild::create([
                 'id_number' => $childId,
                 'child_name' => $childData['name'] ?? null,
@@ -51,9 +54,11 @@ final class ChildFollowUpTransfer
                 'admission_date' => Carbon::today(),
                 'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
                 'discharge_date' => null,
-                // No Children row is written for this reading, so the link
-                // points at the child's previous visit when there is one.
-                'source_child_visit_id' => ChildDuplicateChecker::latestActiveVisit($childId)?->getKey(),
+                // The Children row written for this very reading when this is
+                // a first-ever visit; otherwise no row is written for it, so
+                // the link points at the child's previous visit instead.
+                'source_child_visit_id' => $sourceChild?->getKey()
+                    ?? ChildDuplicateChecker::latestActiveVisit($childId)?->getKey(),
             ]);
 
             $followUpChild->visits()->create([
@@ -65,6 +70,26 @@ final class ChildFollowUpTransfer
 
             return $followUpChild;
         });
+    }
+
+    /**
+     * Whether this is the child's first ever visit: no active record carries
+     * this ID number in either module, so the child is entirely new to the
+     * system.
+     *
+     * Both lookups go through the models' default scope, which SoftDeletes
+     * already narrows to non-trashed rows - a child whose only record is in
+     * the Trash is not in the system any more, and registering the same ID
+     * again is a first visit all over again.
+     */
+    public static function isFirstEverVisit(mixed $childId): bool
+    {
+        if (blank($childId)) {
+            return true;
+        }
+
+        return ! ChildDuplicateChecker::hasActiveVisit($childId)
+            && ! FollowUpChild::query()->where('id_number', $childId)->exists();
     }
 
     /**

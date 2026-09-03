@@ -30,6 +30,18 @@ class CreateChild extends CreateRecord
     protected array $pendingData = [];
 
     /**
+     * The confirmed FI of a referral in flight, set once "yes" has been given
+     * and the reading is going into follow-up.
+     */
+    protected ?string $referralFi = null;
+
+    /**
+     * Where to send the user after a first-ever-visit referral: the follow-up
+     * record that was raised alongside the Children row.
+     */
+    protected ?string $referralRedirectUrl = null;
+
+    /**
      * Pull the relatively stable data of the last active visit into the form.
      *
      * The measurements taken during this visit (MUAC, weight, height, WHZ,
@@ -70,13 +82,18 @@ class CreateChild extends CreateRecord
      *
      * A Normal reading is untouched and follows the existing visit-type and
      * relapse rules exactly as before. A MAM or SAM reading is a referral
-     * decision, so nothing is written until the user has confirmed it:
+     * decision, so nothing is written until the user has confirmed it: the
+     * first pass raises the confirmation and stops, leaving the form intact so
+     * a mistyped MUAC can simply be corrected.
      *
-     *  - first pass: raise the confirmation and stop, leaving the form intact
-     *    so a mistyped MUAC can simply be corrected;
-     *  - after "yes": enrol the child in follow-up, carry this very reading
-     *    over as visit 1, and stop before the Children row is written - the
-     *    same screening must not be counted in both modules.
+     * What "yes" then writes depends on whether the child is new to the system:
+     *
+     *  - first ever visit (no active record in either module): the screening
+     *    is a real event in its own right, so the Children row is written as
+     *    usual and the follow-up record is raised alongside it in afterCreate();
+     *  - a later relapse (the child already has a Children record): the reading
+     *    belongs to the follow-up record only, and no second Children row is
+     *    written for it - that would count the same screening twice.
      */
     protected function beforeCreate(): void
     {
@@ -96,13 +113,16 @@ class CreateChild extends CreateRecord
             $this->halt();
         }
 
+        $this->referralFi = $fi;
+
+        if (ChildFollowUpTransfer::isFirstEverVisit($this->pendingData['child_id'] ?? null)) {
+            // Let the ordinary creation run; afterCreate() enrols the child.
+            return;
+        }
+
         $followUpChild = ChildFollowUpTransfer::admit($this->pendingData, $fi);
 
-        Notification::make()
-            ->success()
-            ->title(__('fields.referral_created_title'))
-            ->body(__('fields.referral_created_body', ['fi' => $fi]))
-            ->send();
+        $this->announceReferral($fi, wroteChildRow: false);
 
         $this->redirect(FollowUpChildResource::getUrl('edit', ['record' => $followUpChild]));
 
@@ -110,6 +130,59 @@ class CreateChild extends CreateRecord
         // follow-up record only. halt() commits rather than rolls back, so the
         // record just created above survives.
         $this->halt();
+    }
+
+    /**
+     * First ever visit, confirmed as a referral: the Children row has just
+     * been written, so enrol the child in follow-up and link the two records
+     * to each other.
+     *
+     * Both writes share the transaction the create is already running in, so
+     * a Children row can never be left behind without its admission.
+     */
+    protected function afterCreate(): void
+    {
+        if ($this->referralFi === null) {
+            return;
+        }
+
+        /** @var \App\Models\Child $child */
+        $child = $this->getRecord();
+
+        $followUpChild = ChildFollowUpTransfer::admit($this->pendingData, $this->referralFi, $child);
+
+        // The back-reference is what lets a later report tell this screening
+        // apart from an ordinary one, should it ever need to exclude it.
+        $child->forceFill(['source_follow_up_child_id' => $followUpChild->getKey()])->saveQuietly();
+
+        $this->referralRedirectUrl = FollowUpChildResource::getUrl('edit', ['record' => $followUpChild]);
+
+        $this->announceReferral($this->referralFi, wroteChildRow: true);
+    }
+
+    /**
+     * Send the user to the new follow-up record rather than to wherever a
+     * plain Children create would have gone.
+     */
+    protected function getRedirectUrl(): string
+    {
+        return $this->referralRedirectUrl ?? parent::getRedirectUrl();
+    }
+
+    /**
+     * Say which of the two things actually happened, since a first ever visit
+     * leaves a Children row behind and a later relapse deliberately does not.
+     */
+    private function announceReferral(string $fi, bool $wroteChildRow): void
+    {
+        Notification::make()
+            ->success()
+            ->title(__('fields.referral_created_title'))
+            ->body(__(
+                $wroteChildRow ? 'fields.referral_created_with_child_body' : 'fields.referral_created_body',
+                ['fi' => $fi],
+            ))
+            ->send();
     }
 
     /**

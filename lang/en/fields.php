@@ -319,6 +319,7 @@ return [
     // Automatic transfer between the Children and Follow Up Child modules
     'referral_created_title' => 'Child referred to the follow-up programme',
     'referral_created_body' => 'A new follow-up record was created, admitted with :fi, and this reading was stored as its first visit. No Children row was written for it.',
+    'referral_created_with_child_body' => 'This is the child’s first ever visit, so it was saved in Children as a "New" visit and a follow-up record was raised alongside it, admitted with :fi and carrying a matching first visit.',
     'discharge_cured_title' => 'Child discharged (Cured)',
     'discharge_cured_body' => 'The follow-up record is now locked, and a new Children visit was created with visit type "New".',
     'discharge_incomplete_body' => 'The follow-up record is now locked, but no Children record could be created because required details (sex, name or ID number) are missing.',

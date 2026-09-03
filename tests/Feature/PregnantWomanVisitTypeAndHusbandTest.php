@@ -4,9 +4,14 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\PregnantLactatingWomanResource;
 use App\Filament\Resources\PregnantLactatingWomanResource\Pages\CreatePregnantLactatingWoman;
+use App\Filament\Resources\PregnantLactatingWomanResource\Pages\EditPregnantLactatingWoman;
 use App\Models\PregnantLactatingWoman;
+use App\Models\User;
 use App\Support\PregnantWomanDuplicateChecker;
+use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportTesting\Testable;
+use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -202,6 +207,87 @@ class PregnantWomanVisitTypeAndHusbandTest extends TestCase
 
         // No status picked yet, so the visit type waits inside the follow-up loop.
         $this->assertSame('follow_up', $filled['visit_type']);
+    }
+
+    // Editing: correcting a wrongly picked status re-derives the visit type.
+
+    /**
+     * A visit carrying every field the form insists on, so saving it from the
+     * edit page exercises the visit type and nothing else.
+     */
+    private function completeVisit(array $attributes = []): PregnantLactatingWoman
+    {
+        return PregnantLactatingWoman::factory()->create(array_merge([
+            'mother_id' => '123456789',
+            'full_name_ar' => 'اسم الأم',
+            'phone_number' => '0591234567',
+            'date_of_birth' => '1996-05-04',
+            // Not married, so the husband fields stay optional.
+            'status' => 'أرملة',
+            'muac_mm' => 240,
+            'governorate' => 'gaza',
+            'municipality' => 'gaza',
+            'neighbourhood' => 'El Shatee',
+        ], $attributes));
+    }
+
+    private function editPage(PregnantLactatingWoman $record): Testable
+    {
+        $this->seed(RolesAndPermissionsSeeder::class);
+
+        $admin = User::factory()->create();
+        $admin->assignRole('Admin');
+
+        return Livewire::actingAs($admin)->test(EditPregnantLactatingWoman::class, ['record' => $record->getKey()]);
+    }
+
+    public function test_correcting_the_status_while_editing_re_derives_the_visit_type(): void
+    {
+        // First visit: pregnant, so "new".
+        $this->completeVisit(['status_type' => 'pregnant', 'visit_type' => 'new', 'date_of_reporting' => '2026-01-01']);
+
+        // Second visit: pregnant picked by mistake, so it read as a follow up.
+        $second = $this->completeVisit(['status_type' => 'pregnant', 'visit_type' => 'follow_up', 'date_of_reporting' => '2026-02-01']);
+
+        // Correcting it to breastfeeding is a different care cycle: "new".
+        $this->editPage($second)
+            ->assertFormSet(['visit_type' => 'follow_up'])
+            ->set('data.status_type', 'lactating')
+            ->assertFormSet(['visit_type' => 'new'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('new', $second->refresh()->visit_type);
+    }
+
+    public function test_editing_without_touching_the_status_keeps_the_visit_type(): void
+    {
+        $this->completeVisit(['status_type' => 'pregnant', 'visit_type' => 'new', 'date_of_reporting' => '2026-01-01']);
+        $second = $this->completeVisit(['status_type' => 'pregnant', 'visit_type' => 'follow_up', 'date_of_reporting' => '2026-02-01']);
+
+        $this->editPage($second)
+            ->set('data.full_name_ar', 'اسم مصحح')
+            ->assertFormSet(['visit_type' => 'follow_up'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('follow_up', $second->refresh()->visit_type);
+    }
+
+    public function test_editing_the_only_visit_of_a_mother_stays_new(): void
+    {
+        // Compared against itself this record would look like an unchanged
+        // status and drop to "follow up", so it has to be left out of the
+        // lookup for the previous visit.
+        $only = $this->completeVisit(['status_type' => 'pregnant', 'visit_type' => 'new', 'date_of_reporting' => '2026-01-01']);
+
+        $this->editPage($only)
+            ->set('data.status_type', 'lactating')
+            ->assertFormSet(['visit_type' => 'new'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('new', $only->refresh()->visit_type);
     }
 
     // Husband data: required only while the mother is married.

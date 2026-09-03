@@ -11,6 +11,7 @@ use App\Imports\ImportDefinition;
 use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Models\User;
+use App\Support\ChildFollowUpTransfer;
 use App\Support\ImportSchema;
 use App\Support\MuacClassifier;
 use Database\Seeders\RolesAndPermissionsSeeder;
@@ -132,15 +133,143 @@ class ChildFollowUpTransferTest extends TestCase
         $this->assertSame('SAM', $firstVisit->getRawOriginal('fi'));
     }
 
-    public function test_a_mam_reading_is_admitted_as_mam(): void
+    // A first ever visit - no active record in either module - is a screening
+    // event in its own right, so it is written to Children as well.
+
+    public function test_a_first_ever_visit_is_saved_in_both_modules(): void
+    {
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->assertDispatched('show-child-referral-alert')
+            ->call('confirmChildReferral');
+
+        $child = Child::firstWhere('child_id', '123456789');
+
+        $this->assertNotNull($child, 'A first ever visit must leave a Children row behind.');
+        $this->assertSame(1, Child::count());
+        $this->assertSame('new', $child->visit_type);
+        $this->assertSame('SAM', $child->fi);
+        $this->assertEqualsWithDelta(110.0, (float) $child->muac_mm, 0.001);
+        // Every field actually entered on the form is stored, not just the reading.
+        $this->assertSame('طفل الاختبار', $child->name);
+        $this->assertSame('0591234567', $child->phone_number);
+        $this->assertSame('El Salam Camp', $child->type_of_site);
+
+        $followUp = FollowUpChild::with('visits')->firstWhere('id_number', '123456789');
+
+        $this->assertNotNull($followUp);
+        $this->assertSame('SAM', $followUp->admitted_with);
+        $this->assertSame(FollowUpChild::ACTIVE_OUTCOME, $followUp->discharge_outcome);
+
+        $visit = $followUp->visits->first();
+        $this->assertSame(1, $visit->visit_number);
+        $this->assertSame('SAM', $visit->fi);
+        $this->assertEqualsWithDelta(110.0, (float) $visit->muac, 0.001);
+        $this->assertSame(
+            $child->date_of_reporting->format('Y-m-d'),
+            $visit->visit_date->format('Y-m-d'),
+            'The first visit carries the date of the reading it came from.',
+        );
+
+        // The two records point at each other, so a report can always tell
+        // this screening apart from an ordinary one.
+        $this->assertSame($followUp->id, $child->source_follow_up_child_id);
+        $this->assertSame($child->id, $followUp->source_child_visit_id);
+    }
+
+    public function test_a_first_ever_mam_visit_is_saved_in_both_modules(): void
     {
         Livewire::test(CreateChild::class)
             ->fillForm($this->childFormData(120))
             ->call('create')
             ->call('confirmChildReferral');
 
-        $this->assertSame('MAM', FollowUpChild::first()->admitted_with);
+        $child = Child::firstWhere('child_id', '123456789');
+
+        $this->assertNotNull($child);
+        $this->assertSame('new', $child->visit_type);
+        $this->assertSame('MAM', $child->fi);
+
+        $followUp = FollowUpChild::firstWhere('id_number', '123456789');
+
+        $this->assertSame('MAM', $followUp->admitted_with);
+        $this->assertSame('MAM', $followUp->visits->first()->fi);
+        $this->assertSame($followUp->id, $child->source_follow_up_child_id);
+    }
+
+    public function test_cancelling_a_first_ever_visit_still_writes_nothing(): void
+    {
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->assertDispatched('show-child-referral-alert');
+
         $this->assertSame(0, Child::count());
+        $this->assertSame(0, FollowUpChild::count());
+    }
+
+    /**
+     * A child already known to the follow-up module is not a first visit
+     * either, even with no Children row of their own.
+     */
+    public function test_a_child_already_in_follow_up_is_not_a_first_ever_visit(): void
+    {
+        FollowUpChild::factory()->create(['id_number' => '123456789']);
+
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->call('confirmChildReferral');
+
+        $this->assertSame(0, Child::count(), 'Only a genuinely first visit writes a Children row.');
+        $this->assertSame(2, FollowUpChild::count());
+    }
+
+    public function test_a_trashed_record_makes_the_next_registration_a_first_visit_again(): void
+    {
+        Child::factory()->create(['child_id' => '123456789', 'muac_mm' => 130])->delete();
+
+        $this->assertTrue(ChildFollowUpTransfer::isFirstEverVisit('123456789'));
+
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->call('confirmChildReferral');
+
+        $this->assertSame(1, Child::count(), 'The trashed row does not count, so this is a first visit.');
+        $this->assertSame('new', Child::first()->visit_type);
+        $this->assertSame(1, FollowUpChild::count());
+    }
+
+    // A later relapse keeps the original behaviour: the reading goes to the
+    // follow-up record only.
+
+    public function test_a_later_relapse_writes_no_second_children_row(): void
+    {
+        $previous = Child::factory()->create([
+            'child_id' => '123456789',
+            'muac_mm' => 130,
+            'date_of_reporting' => now()->subMonth(),
+        ]);
+
+        $this->assertFalse(ChildFollowUpTransfer::isFirstEverVisit('123456789'));
+
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->assertDispatched('show-child-referral-alert')
+            ->call('confirmChildReferral');
+
+        $this->assertSame(1, Child::count(), 'A relapse reading must not be counted in Children again.');
+        $this->assertNull($previous->fresh()->source_follow_up_child_id);
+
+        $followUp = FollowUpChild::firstWhere('id_number', '123456789');
+
+        $this->assertSame('SAM', $followUp->admitted_with);
+        $this->assertSame('SAM', $followUp->visits->first()->fi);
+        // The link points at the earlier visit, which is the only Children row.
+        $this->assertSame($previous->id, $followUp->source_child_visit_id);
     }
 
     // -----------------------------------------------------------------
