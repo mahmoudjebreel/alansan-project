@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Support\PublicUploads;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
@@ -12,7 +13,10 @@ use Illuminate\Support\Facades\Storage;
 
 class EditProfile extends BaseEditProfile
 {
-    protected static ?string $title = 'ملفي الشخصي';
+    public function getTitle(): string
+    {
+        return __('ui.profile.title');
+    }
 
     public function form(Schema $schema): Schema
     {
@@ -28,7 +32,7 @@ class EditProfile extends BaseEditProfile
     protected function getNameFormComponent(): Component
     {
         return TextInput::make('name')
-            ->label('الاسم')
+            ->label(__('ui.profile.name'))
             ->required()
             ->maxLength(255)
             ->autofocus();
@@ -37,10 +41,10 @@ class EditProfile extends BaseEditProfile
     protected function getAvatarFormComponent(): Component
     {
         return FileUpload::make('avatar')
-            ->label('الصورة الشخصية')
+            ->label(__('ui.profile.avatar'))
             ->image()
             ->avatar()
-            ->disk('public')
+            ->disk(PublicUploads::DISK)
             ->directory('avatars')
             ->visibility('public')
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
@@ -51,7 +55,7 @@ class EditProfile extends BaseEditProfile
             {
             return Notification::make()
                 ->success()
-                ->title('تم تحديث الملف الشخصي بنجاح');
+                ->title(__('ui.profile.updated'));
             }
 
     /**
@@ -64,7 +68,7 @@ class EditProfile extends BaseEditProfile
         $newAvatar = $data['avatar'] ?? null;
 
         if ($currentAvatar && $currentAvatar !== $newAvatar) {
-            Storage::disk('public')->delete($currentAvatar);
+            Storage::disk(PublicUploads::DISK)->delete($currentAvatar);
         }
 
         return $data;

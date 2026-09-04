@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\MuacClassifier;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -72,23 +73,15 @@ class IndividualCounseling extends Model
     /**
      * Classify a MUAC measurement: <=115 SAM, 116-124 MAM, >=125 Normal.
      *
-     * Note the upper boundary differs by one from Child::classifyMuac, which
-     * still counts 125 as MAM. The Individual Counseling programme treats 125
-     * as Normal, so the two are deliberately not shared.
+     * This used to carry its own copy of the thresholds, under a comment
+     * saying the upper boundary differed from the Children module by one.
+     * The two implementations were in fact identical - whichever change made
+     * them agree left the comment behind - so the copy is gone and both read
+     * the one classifier. A child measured at 124 mm is MAM in every module.
      */
     public static function classifyMuac(mixed $muac): ?string
     {
-        if ($muac === null || $muac === '') {
-            return null;
-        }
-
-        $muac = (float) $muac;
-
-        return match (true) {
-            $muac <= 115 => 'SAM',
-            $muac < 125 => 'MAM',
-            default => 'Normal',
-        };
+        return MuacClassifier::classify($muac);
     }
 
     /**

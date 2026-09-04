@@ -30,15 +30,24 @@ class NotificationLogPage extends Page implements HasTable
 
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-inbox-stack';
 
-    protected static ?string $navigationLabel = 'سجل الإشعارات';
-
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $title = 'سجل الإشعارات';
-
     protected static ?int $navigationSort = 12;
 
     protected string $view = 'filament.pages.notification-log-page';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.notification_log.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.notification_log.title');
+    }
 
     public static function canAccess(): bool
     {
@@ -58,36 +67,36 @@ class NotificationLogPage extends Page implements HasTable
             ->defaultSort('created_at', 'desc')
             ->columns([
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('التاريخ والوقت')
+                    ->label(__('ui.notification_log.datetime'))
                     ->dateTime('Y-m-d H:i')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('data.action_type')
-                    ->label('نوع الإجراء')
+                    ->label(__('ui.notification_log.action_type'))
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => filled($state) ? ActionType::title($state) : '-')
                     ->color(fn (?string $state): string => filled($state) ? ActionType::color($state) : 'gray'),
                 Tables\Columns\TextColumn::make('data.module_label')
-                    ->label('القسم'),
+                    ->label(__('ui.notification_log.module')),
                 Tables\Columns\TextColumn::make('data.actor_name')
-                    ->label('الفاعل'),
+                    ->label(__('ui.notification_log.actor')),
                 Tables\Columns\TextColumn::make('data.actor_role')
-                    ->label('الدور')
+                    ->label(__('ui.notification_log.role'))
                     ->badge()
                     ->color('gray'),
                 Tables\Columns\TextColumn::make('data.record_label')
-                    ->label('السجل')
+                    ->label(__('ui.notification_log.record'))
                     ->placeholder('-')
                     ->wrap(),
                 Tables\Columns\TextColumn::make('data.record_count')
-                    ->label('عدد السجلات')
+                    ->label(__('ui.notification_log.record_count'))
                     ->alignCenter(),
                 Tables\Columns\TextColumn::make('data.priority')
-                    ->label('الأولوية')
+                    ->label(__('ui.notification_log.priority'))
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        'high' => 'مرتفعة',
-                        'medium' => 'متوسطة',
-                        'low' => 'منخفضة',
+                        'high' => __('ui.notification_log.priority_high'),
+                        'medium' => __('ui.notification_log.priority_medium'),
+                        'low' => __('ui.notification_log.priority_low'),
                         default => '-',
                     })
                     ->color(fn (?string $state): string => match ($state) {
@@ -97,38 +106,38 @@ class NotificationLogPage extends Page implements HasTable
                         default => 'gray',
                     }),
                 Tables\Columns\TextColumn::make('read_at')
-                    ->label('الحالة')
+                    ->label(__('ui.notification_log.status'))
                     ->badge()
-                    ->formatStateUsing(fn ($state): string => filled($state) ? 'مقروء' : 'غير مقروء')
+                    ->formatStateUsing(fn ($state): string => filled($state) ? __('ui.notification_log.read') : __('ui.notification_log.unread'))
                     ->color(fn ($state): string => filled($state) ? 'gray' : 'info'),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('action_type')
-                    ->label('نوع الإجراء')
+                    ->label(__('ui.notification_log.action_type'))
                     ->options(ActionType::options())
                     ->query(fn (Builder $query, array $data): Builder => $query->when(
                         $data['value'] ?? null,
                         fn (Builder $query, string $value): Builder => $query->where('data->action_type', $value),
                     )),
                 Tables\Filters\SelectFilter::make('module')
-                    ->label('القسم')
+                    ->label(__('ui.notification_log.module'))
                     ->options(NotifiableModule::options())
                     ->query(fn (Builder $query, array $data): Builder => $query->when(
                         $data['value'] ?? null,
                         fn (Builder $query, string $value): Builder => $query->where('data->module', $value),
                     )),
                 Tables\Filters\SelectFilter::make('actor')
-                    ->label('الفاعل')
+                    ->label(__('ui.notification_log.actor'))
                     ->options(fn (): array => static::actorOptions())
                     ->query(fn (Builder $query, array $data): Builder => $query->when(
                         $data['value'] ?? null,
                         fn (Builder $query, string $value): Builder => $query->where('data->actor_name', $value),
                     )),
                 Tables\Filters\Filter::make('occurred_at')
-                    ->label('التاريخ')
+                    ->label(__('ui.notification_log.date'))
                     ->form([
-                        Forms\Components\DatePicker::make('from')->label('من تاريخ'),
-                        Forms\Components\DatePicker::make('until')->label('إلى تاريخ'),
+                        Forms\Components\DatePicker::make('from')->label(__('ui.notification_log.from')),
+                        Forms\Components\DatePicker::make('until')->label(__('ui.notification_log.until')),
                     ])
                     ->query(fn (Builder $query, array $data): Builder => $query
                         ->when($data['from'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '>=', $date))
@@ -136,7 +145,7 @@ class NotificationLogPage extends Page implements HasTable
             ])
             ->headerActions([
                 Action::make('exportExcel')
-                    ->label('تصدير Excel')
+                    ->label(__('ui.notification_log.export'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(fn (): BinaryFileResponse => $this->downloadExcel()),
             ]);

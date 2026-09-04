@@ -99,6 +99,7 @@ return [
     'female' => 'أنثى',
     'pregnant' => 'حامل',
     'lactating' => 'مرضع',
+    'pregnant_lactating' => 'حامل + مرضع',
     'government' => 'حكومي',
     'unrwa' => 'وكالة (أونروا)',
     'other' => 'أخرى',
@@ -306,6 +307,7 @@ return [
     'age_months_only' => ':months شهر',
     'visit_date_n' => 'تاريخ الزيارة :n',
     'visit_muac_n' => 'مواك الزيارة :n',
+    'visit_fi_n' => 'تصنيف الزيارة :n',
 
     // Excel import
     'import_excel' => 'استيراد Excel',
@@ -322,7 +324,7 @@ return [
     'import_missing_columns' => 'الأعمدة التالية مفقودة من الملف: :columns',
     'import_required' => ':field مطلوب.',
     'import_invalid_boolean' => 'قيمة غير صالحة للحقل :field — يجب أن تكون :allowed.',
-    'import_invalid_option' => 'قيمة غير صالحة للحقل :field — يجب أن تكون إحدى القيم: :allowed.',
+    'import_invalid_option' => 'القيمة ":value" غير صالحة للحقل :field — يجب أن تكون إحدى القيم: :allowed.',
     'import_unreadable_option' => 'تعذّر التحقق من قيمة الحقل :field — قائمة الخيارات المعتمدة لهذا الحقل غير متاحة، فلم يتم قبول القيمة. يرجى إبلاغ مسؤول النظام.',
     'import_invalid_date' => 'تاريخ غير صالح للحقل :field.',
     'import_invalid_number' => 'الحقل :field يجب أن يكون رقماً.',
@@ -355,4 +357,21 @@ return [
     'meal_discharges' => 'حالات التخريج',
     'meal_unsupported_heading' => 'أعمدة لا يلتقطها النظام',
     'meal_unsupported_hint' => 'هذه الأعمدة موجودة في النموذج الرسمي لكن لا يوجد لها حقل في قاعدة البيانات، لذلك تُترك فارغة بدل تعبئتها بصفر.',
+
+    // Children -> Follow Up Child referral and discharge
+    'record_state' => 'حالة السجل',
+    'record_active' => 'مفتوح',
+    'record_locked' => 'مغلق',
+    'record_locked_notice' => 'هذا السجل مغلق بعد التخريج ولا يمكن تعديله.',
+    'referred_to_follow_up_title' => 'تمت الإحالة إلى متابعة الأطفال',
+    'referred_to_follow_up_body' => 'تم حفظ زيارة :name في الأطفال، وفتح ملف متابعة له لأن القياس جاء :fi.',
+    'open_follow_up_record' => 'فتح ملف المتابعة',
+    'open_children_record' => 'فتح سجل الطفل',
+    'discharged_as_cured' => 'تم تخريج الطفل كحالة شفاء، وأُعيد إلى سجل الأطفال.',
+    'kept_under_follow_up' => 'تم إبقاء الطفل تحت المتابعة.',
+    'discharge_missing_data' => 'لا يمكن التخريج: بيانات الطفل الأساسية (الاسم أو رقم الهوية أو الجنس) ناقصة.',
+    'follow_up_created_from_children_only' => 'تُفتح ملفات المتابعة تلقائياً من وحدة الأطفال عند تسجيل قياس SAM أو MAM، ولا تُنشأ يدوياً.',
+    // Pregnant & lactating: the most recent birth, asked separately from the
+    // newborn's own date of birth.
+    'last_newborn_dob' => 'تاريخ آخر مولود',
 ];

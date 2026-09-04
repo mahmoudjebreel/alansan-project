@@ -33,16 +33,16 @@ class NotificationLogExport implements FromQuery, WithHeadings, WithMapping
     public function headings(): array
     {
         return [
-            'التاريخ والوقت',
-            'نوع الإجراء',
-            'القسم',
-            'الفاعل',
-            'الدور',
-            'السجل',
-            'عدد السجلات',
-            'الأولوية',
-            'الحالة',
-            'الرابط',
+            __('ui.notification_log.datetime'),
+            __('ui.notification_log.action_type'),
+            __('ui.notification_log.module'),
+            __('ui.notification_log.actor'),
+            __('ui.notification_log.role'),
+            __('ui.notification_log.record'),
+            __('ui.notification_log.record_count'),
+            __('ui.notification_log.priority'),
+            __('ui.notification_log.status'),
+            __('ui.notification_log.link'),
         ];
     }
 
@@ -64,12 +64,14 @@ class NotificationLogExport implements FromQuery, WithHeadings, WithMapping
             $data['record_label'] ?? null,
             $data['record_count'] ?? null,
             match ($data['priority'] ?? null) {
-                'high' => 'مرتفعة',
-                'medium' => 'متوسطة',
-                'low' => 'منخفضة',
+                'high' => __('ui.notification_log.priority_high'),
+                'medium' => __('ui.notification_log.priority_medium'),
+                'low' => __('ui.notification_log.priority_low'),
                 default => null,
             },
-            filled($record->read_at) ? 'مقروء' : 'غير مقروء',
+            filled($record->read_at)
+                ? __('ui.notification_log.read')
+                : __('ui.notification_log.unread'),
             $data['reference_url'] ?? null,
         ];
     }

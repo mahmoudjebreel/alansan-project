@@ -33,6 +33,43 @@ class PdfRecordTemplateTest extends TestCase
     use RefreshDatabase;
 
     /**
+     * A big report must still produce a PDF.
+     *
+     * mPDF parses the markup it is handed with PCRE, so a single WriteHTML()
+     * of the whole document died with "The HTML code size is larger than
+     * pcre.backtrack_limit" once the export grew past a few hundred records -
+     * and the size at which it died was whatever the server's php.ini said.
+     * The limit is lowered here rather than seeding hundreds of children, so
+     * the regression is reproduced in a fraction of a second: every record
+     * block stays well under it, the whole document does not.
+     */
+    public function test_a_report_larger_than_the_pcre_backtrack_limit_still_renders(): void
+    {
+        Child::factory()->count(12)->create();
+
+        $original = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.backtrack_limit', '20000');
+
+        try {
+            $response = PdfExport::download(
+                new ChildrenExport(Child::query()),
+                'children.pdf',
+                __('fields.children'),
+                'name',
+            );
+
+            ob_start();
+            $response->sendContent();
+            $content = ob_get_clean();
+        } finally {
+            ini_set('pcre.backtrack_limit', (string) $original);
+        }
+
+        $this->assertStringStartsWith('%PDF', $content);
+        $this->assertGreaterThan(20000, strlen($content));
+    }
+
+    /**
      * One seeded record per module, with the export, the name attribute, the
      * name it should print, and the repeated section (or null) the module's
      * PDF is built from.

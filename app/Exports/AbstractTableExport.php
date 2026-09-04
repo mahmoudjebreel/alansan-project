@@ -9,8 +9,35 @@ use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 
+/**
+ * The shared spreadsheet writer behind every module's export.
+ *
+ * Everything a row needs is resolved once per export rather than once per
+ * cell. The column list, the boolean and enum sets and the translated labels
+ * used to be rebuilt inside the mapping of every row: at sixty-eight columns
+ * that is three array literals and two linear searches per cell, so a
+ * hundred-thousand row export did that work several million times before
+ * PhpSpreadsheet had written anything. The lookups below are built on first
+ * use and then read as hash lookups.
+ */
 abstract class AbstractTableExport implements FromQuery, WithHeadings, WithMapping
 {
+    /** @var array<int, string>|null */
+    private ?array $cachedFields = null;
+
+    /** @var array<string, true>|null */
+    private ?array $booleanLookup = null;
+
+    /** @var array<string, true>|null */
+    private ?array $enumLookup = null;
+
+    /** @var array<string, string> Translated enum values, by stored value. */
+    private array $enumLabels = [];
+
+    private ?string $yes = null;
+
+    private ?string $no = null;
+
     public function __construct(protected Builder $query)
     {
     }
@@ -40,10 +67,13 @@ abstract class AbstractTableExport implements FromQuery, WithHeadings, WithMappi
 
     public function map($record): array
     {
-        return array_map(
-            fn (string $field): mixed => $this->formatValue($record, $field),
-            $this->fields(),
-        );
+        $row = [];
+
+        foreach ($this->fieldList() as $field) {
+            $row[] = $this->formatValue($record, $field);
+        }
+
+        return $row;
     }
 
     protected function formatValue(Model $record, string $field): mixed
@@ -54,18 +84,52 @@ abstract class AbstractTableExport implements FromQuery, WithHeadings, WithMappi
             return null;
         }
 
-        if (in_array($field, $this->booleanFields(), true)) {
-            return $value ? __('fields.yes') : __('fields.no');
+        if (isset($this->booleans()[$field])) {
+            return $value ? $this->yesLabel() : $this->noLabel();
         }
 
         if ($value instanceof DateTimeInterface) {
             return $value->format('Y-m-d');
         }
 
-        if (in_array($field, $this->enumFields(), true)) {
-            return __('fields.' . $value);
+        if (isset($this->enums()[$field]) && is_scalar($value)) {
+            return $this->enumLabels[(string) $value] ??= __('fields.' . $value);
         }
 
         return $value;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function fieldList(): array
+    {
+        return $this->cachedFields ??= $this->fields();
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function booleans(): array
+    {
+        return $this->booleanLookup ??= array_fill_keys($this->booleanFields(), true);
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function enums(): array
+    {
+        return $this->enumLookup ??= array_fill_keys($this->enumFields(), true);
+    }
+
+    private function yesLabel(): string
+    {
+        return $this->yes ??= __('fields.yes');
+    }
+
+    private function noLabel(): string
+    {
+        return $this->no ??= __('fields.no');
     }
 }

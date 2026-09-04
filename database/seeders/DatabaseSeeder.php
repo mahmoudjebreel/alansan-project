@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            SettingsSeeder::class,
             RolesAndPermissionsSeeder::class,
             AdminUserSeeder::class,
             // Must stay last: it syncs every permission created above onto the

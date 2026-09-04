@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Filament\Resources\FollowUpChildResource\Pages\CreateFollowUpChild;
+use App\Filament\Resources\FollowUpChildResource\Pages\EditFollowUpChild;
 use App\Filament\Resources\GroupSessionResource;
 use App\Filament\Resources\GroupSessionResource\Pages\CreateGroupSession;
 use App\Filament\Resources\MotherToMotherResource;
@@ -202,7 +202,12 @@ class SessionCategoryAndFollowUpQaTest extends TestCase
 
     public function test_editing_dob_recalculates_the_age_live(): void
     {
-        Livewire::test(CreateFollowUpChild::class)
+        // Checked on the edit form: a follow-up record is opened by the
+        // Children module on a MAM or SAM screening, so there is no create
+        // page to open. @see \App\Support\ChildFollowUpTransfer::refer()
+        $record = FollowUpChild::factory()->create();
+
+        Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
             ->fillForm([
                 'dob' => '2024-01-01',
                 'admission_date' => '2024-07-01',
@@ -247,7 +252,9 @@ class SessionCategoryAndFollowUpQaTest extends TestCase
 
     public function test_discharge_date_is_a_date_picker_not_a_text_input(): void
     {
-        Livewire::test(CreateFollowUpChild::class)
+        $record = FollowUpChild::factory()->create();
+
+        Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
             ->assertFormFieldExists(
                 'discharge_date',
                 fn ($field): bool => $field instanceof \Filament\Forms\Components\DatePicker,

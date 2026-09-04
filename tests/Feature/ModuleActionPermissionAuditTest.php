@@ -69,6 +69,40 @@ class ModuleActionPermissionAuditTest extends TestCase
      *
      * @return array<string, array{0: class-string, 1: class-string, 2: class-string, 3: string, 4: string, 5: bool}>
      */
+    /**
+     * Resources whose records are never created by hand, whatever the role.
+     *
+     * A Follow Up Child record is opened by the Children module when a
+     * screening comes back MAM or SAM, so the module has no create button and
+     * no create page - not because a permission is missing, but because there
+     * is nothing there to authorise. The create assertions below are therefore
+     * skipped for it while every other assertion still applies.
+     *
+     * @see \App\Support\ChildFollowUpTransfer::refer()
+     *
+     * @var array<class-string>
+     */
+    private const NOT_CREATABLE_BY_HAND = [
+        FollowUpChildResource::class,
+    ];
+
+    private static function isCreatableByHand(string $resource): bool
+    {
+        return ! in_array($resource, self::NOT_CREATABLE_BY_HAND, true);
+    }
+
+    /**
+     * Assert the create button is where the module's rules say it should be:
+     * visible for a role that may create, and absent altogether - not merely
+     * hidden - on a module that is never created by hand.
+     */
+    private static function assertCreateButton(mixed $component, string $resource): void
+    {
+        self::isCreatableByHand($resource)
+            ? $component->assertActionVisible(CreateAction::class)
+            : $component->assertActionDoesNotExist(CreateAction::class);
+    }
+
     public static function modules(): array
     {
         return [
@@ -274,8 +308,15 @@ class ModuleActionPermissionAuditTest extends TestCase
         $record = $model::factory()->create();
 
         $component = Livewire::actingAs($viewer)
-            ->test($listPage)
-            ->assertActionHidden(CreateAction::class)
+            ->test($listPage);
+
+        // A module that is never created by hand has no create button for
+        // anyone; everywhere else a Viewer must not see the one that exists.
+        self::isCreatableByHand($resource)
+            ? $component->assertActionHidden(CreateAction::class)
+            : $component->assertActionDoesNotExist(CreateAction::class);
+
+        $component
             ->assertTableActionHidden(EditAction::class, $record)
             ->assertTableBulkActionHidden(DeleteBulkAction::class)
             // Import is a write, and a Viewer holds no *.import.
@@ -400,8 +441,11 @@ class ModuleActionPermissionAuditTest extends TestCase
         $record = $model::factory()->create();
 
         $component = Livewire::actingAs($dataEntry)
-            ->test($listPage)
-            ->assertActionVisible(CreateAction::class)
+            ->test($listPage);
+
+        self::assertCreateButton($component, $resource);
+
+        $component
             ->assertTableActionVisible(EditAction::class, $record)
             ->assertActionVisible('importExcel')
             ->assertTableBulkActionHidden(DeleteBulkAction::class)
@@ -425,11 +469,17 @@ class ModuleActionPermissionAuditTest extends TestCase
 
         $this->actingAs($dataEntry);
 
-        $this->assertTrue($resource::canCreate());
         $this->assertTrue($resource::canEdit($record));
-
-        $this->get($resource::getUrl('create'))->assertSuccessful();
         $this->get($resource::getUrl('edit', ['record' => $record]))->assertSuccessful();
+
+        if (! self::isCreatableByHand($resource)) {
+            $this->assertFalse($resource::canCreate());
+
+            return;
+        }
+
+        $this->assertTrue($resource::canCreate());
+        $this->get($resource::getUrl('create'))->assertSuccessful();
     }
 
     #[DataProvider('modules')]
@@ -484,14 +534,16 @@ class ModuleActionPermissionAuditTest extends TestCase
         $this->actingAs($admin);
 
         $this->assertTrue($resource::canViewAny());
-        $this->assertTrue($resource::canCreate());
+        $this->assertSame(self::isCreatableByHand($resource), $resource::canCreate());
         $this->assertTrue($resource::canEdit($record));
         $this->assertTrue($resource::canDelete($record));
         $this->assertTrue($resource::canDeleteAny());
 
-        Livewire::actingAs($admin)
-            ->test($listPage)
-            ->assertActionVisible(CreateAction::class)
+        $component = Livewire::actingAs($admin)->test($listPage);
+
+        self::assertCreateButton($component, $resource);
+
+        $component
             ->assertTableActionVisible(EditAction::class, $record)
             ->assertTableActionVisible(ViewAction::class, $record)
             ->assertTableBulkActionVisible(DeleteBulkAction::class)
@@ -528,14 +580,16 @@ class ModuleActionPermissionAuditTest extends TestCase
 
         $this->actingAs($superAdmin);
 
-        $this->assertTrue($resource::canCreate());
+        $this->assertSame(self::isCreatableByHand($resource), $resource::canCreate());
         $this->assertTrue($resource::canEdit($record));
         $this->assertTrue($resource::canDelete($record));
         $this->assertTrue($resource::canDeleteAny());
 
-        Livewire::actingAs($superAdmin)
-            ->test($listPage)
-            ->assertActionVisible(CreateAction::class)
+        $component = Livewire::actingAs($superAdmin)->test($listPage);
+
+        self::assertCreateButton($component, $resource);
+
+        $component
             ->assertTableBulkActionVisible(DeleteBulkAction::class)
             ->callTableBulkAction(DeleteBulkAction::class, [$record]);
 

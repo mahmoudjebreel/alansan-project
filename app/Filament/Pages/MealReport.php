@@ -30,15 +30,24 @@ class MealReport extends Page implements HasForms
 
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-document-chart-bar';
 
-    protected static ?string $navigationLabel = 'تقرير MEAL الشهري';
-
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $title = 'تقرير MEAL الشهري';
-
     protected static ?int $navigationSort = 19;
 
     protected string $view = 'filament.pages.meal-report';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.meal_report.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.reports');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.meal_report.title');
+    }
 
     public ?array $data = [];
 

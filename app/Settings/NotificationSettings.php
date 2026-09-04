@@ -26,8 +26,9 @@ class NotificationSettings extends Settings
     public array $enabled_actions;
 
     /**
-     * Which Super Admins receive notifications. Empty means "every Super
-     * Admin", which is also the default.
+     * Which users receive notifications. Any user can be named here, not only
+     * a Super Admin - naming an Admin is how that Admin starts receiving them.
+     * Empty means "every Super Admin", which is also the default.
      *
      * @var array<int>
      */

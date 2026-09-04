@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\Forms\DigitStringField;
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\MotherToMotherResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
@@ -26,7 +28,10 @@ class MotherToMotherResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-heart';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
@@ -43,12 +48,12 @@ class MotherToMotherResource extends Resource
         return $schema->schema([
             \Filament\Schemas\Components\Tabs::make('MotherToMotherTabs')
                 ->tabs([
-                    \Filament\Schemas\Components\Tabs\Tab::make('بيانات جلسة من أم لأم')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.mother_to_mother_data'))
                         ->icon('heroicon-o-heart')
                         ->schema([
                             static::getSessionDataSection(),
                         ]),
-                    \Filament\Schemas\Components\Tabs\Tab::make('بيانات المشاركة')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.female_participant_data'))
                         ->icon('heroicon-o-user-group')
                         ->schema([
                             static::getParticipantDataSection(),
@@ -93,12 +98,13 @@ class MotherToMotherResource extends Resource
                 Forms\Components\TextInput::make('id_number')
                     ->label(__('fields.id_number'))
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهوية مطلوب.',
-                        'numeric' => 'رقم الهوية يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهوية يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.identity_required'),
+                        'regex' => __('ui.validation.identity_digits'),
                     ])
                     ->maxLength(255),
                 Forms\Components\TextInput::make('full_name_ar')->label(__('fields.full_name_ar'))->required()->maxLength(255),
@@ -123,12 +129,13 @@ class MotherToMotherResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهاتف مطلوب.',
-                        'numeric' => 'رقم الهاتف يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهاتف يجب أن يتكون من 10 أرقام بالضبط.',
+                        'required' => __('ui.validation.phone_required'),
+                        'regex' => __('ui.validation.phone_digits'),
                     ])
                     ->maxLength(255),
                 Forms\Components\TextInput::make('receives_supplementary')->label(__('fields.receives_supplementary'))->maxLength(255),
@@ -180,12 +187,12 @@ class MotherToMotherResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('session_date')->label(__('fields.session_date'))->date()->sortable(),
-                Tables\Columns\TextColumn::make('session_group_number')->label(__('fields.session_group_number'))->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('session_group_number')->label(__('fields.session_group_number'))->searchable(query: RecordSearch::identifier('session_group_number'))->sortable(),
                 Tables\Columns\TextColumn::make('session_subject')->label(__('fields.session_subject'))->badge()->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('locality')->label(__('fields.locality'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
-                Tables\Columns\TextColumn::make('shelter_name')->label(__('fields.shelter_name'))->searchable(),
-                Tables\Columns\TextColumn::make('id_number')->label(__('fields.id_number'))->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('full_name_ar')->label(__('fields.full_name_ar'))->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('shelter_name')->label(__('fields.shelter_name'))->searchable(query: RecordSearch::name('shelter_name')),
+                Tables\Columns\TextColumn::make('id_number')->label(__('fields.id_number'))->searchable(query: RecordSearch::identifier('id_number'))->sortable(),
+                Tables\Columns\TextColumn::make('full_name_ar')->label(__('fields.full_name_ar'))->searchable(query: RecordSearch::name('full_name_ar'))->sortable(),
                 Tables\Columns\TextColumn::make('visit_type')->label(__('fields.visit_type'))->badge()->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('category')->label(__('fields.category'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 YesNoColumn::make('is_pwd')->label(__('fields.is_pwd'))->toggleable(isToggledHiddenByDefault: true),
@@ -218,7 +225,7 @@ class MotherToMotherResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

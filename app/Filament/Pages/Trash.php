@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\Child;
+use App\Models\FollowUpChild;
 use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\MotherToMotherSession;
@@ -21,20 +22,39 @@ class Trash extends Page
 
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-trash';
 
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $navigationLabel = 'سلة المحذوفات';
-
-    protected static ?string $title = 'سلة المحذوفات';
-
     protected static ?int $navigationSort = 21;
 
     protected string $view = 'filament.pages.trash';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.trash.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.trash');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.trash.title');
+    }
 
     /**
      * Number of records shown per page.
      */
     public int $perPage = 25;
+
+    /**
+     * Totals for the header cards, filled in by getRows().
+     *
+     * Livewire round-trips every public property, so the timestamp is kept as
+     * an already-formatted string rather than a Carbon instance.
+     *
+     * @var array{total: int, modules: int, latest: string|null}
+     */
+    public array $summary = ['total' => 0, 'modules' => 0, 'latest' => null];
 
     public static function canAccess(): bool
     {
@@ -44,42 +64,63 @@ class Trash extends Page
     /**
      * Central registry of every soft-deletable module surfaced in the Trash.
      *
-     * Each entry describes how to label a record, pull its key identifier, and
-     * derive a human-readable name. Adding a new module is a single array entry.
+     * Each entry describes how to label a record, pull its key identifier,
+     * derive a human-readable name, and which icon and colour stand for the
+     * module in the listing. Adding a new module is a single array entry - the
+     * view reads the badge straight off it, so a module can no longer be added
+     * here and come out grey because a colour map elsewhere was not updated.
      *
-     * @return array<string, array{model: class-string<Model>, label: string, name: callable, identifier: callable}>
+     * @return array<string, array{model: class-string<Model>, label: string, icon: string, color: string, name: callable, identifier: callable}>
      */
     public static function modules(): array
     {
         return [
             'child' => [
                 'model' => Child::class,
-                'label' => 'الأطفال',
+                'label' => __('ui.modules.child'),
+                'icon' => 'heroicon-o-face-smile',
+                'color' => 'primary',
                 'name' => fn (Model $record): ?string => $record->name,
                 'identifier' => fn (Model $record): ?string => $record->child_id,
             ],
             'pregnant_lactating_woman' => [
                 'model' => PregnantLactatingWoman::class,
-                'label' => 'الحوامل والمرضعات',
+                'label' => __('ui.modules.pregnant_lactating_woman'),
+                'icon' => 'heroicon-o-heart',
+                'color' => 'info',
                 'name' => fn (Model $record): ?string => $record->full_name_ar,
                 'identifier' => fn (Model $record): ?string => $record->mother_id,
             ],
             'individual_counseling' => [
                 'model' => IndividualCounseling::class,
-                'label' => 'الاستشارة الفردية',
+                'label' => __('ui.modules.individual_counseling'),
+                'icon' => 'heroicon-o-chat-bubble-left-right',
+                'color' => 'warning',
                 'name' => fn (Model $record): ?string => $record->mother_name ?: $record->child_name,
                 'identifier' => fn (Model $record): ?string => $record->mother_id_number,
             ],
             'mother_to_mother' => [
                 'model' => MotherToMotherSession::class,
-                'label' => 'الأم للأم',
+                'label' => __('ui.modules.mother_to_mother'),
+                'icon' => 'heroicon-o-users',
+                'color' => 'success',
                 'name' => fn (Model $record): ?string => $record->full_name_ar,
                 'identifier' => fn (Model $record): ?string => $record->id_number,
             ],
             'group_session' => [
                 'model' => GroupSession::class,
-                'label' => 'الجلسات الجماعية',
+                'label' => __('ui.modules.group_session'),
+                'icon' => 'heroicon-o-user-group',
+                'color' => 'gray',
                 'name' => fn (Model $record): ?string => $record->full_name_ar,
+                'identifier' => fn (Model $record): ?string => $record->id_number,
+            ],
+            'follow_up_child' => [
+                'model' => FollowUpChild::class,
+                'label' => __('ui.modules.follow_up_child'),
+                'icon' => 'heroicon-o-clipboard-document-check',
+                'color' => 'danger',
+                'name' => fn (Model $record): ?string => $record->child_name,
                 'identifier' => fn (Model $record): ?string => $record->id_number,
             ],
         ];
@@ -110,6 +151,8 @@ class Trash extends Page
                 $rows->push([
                     'type' => $type,
                     'module' => $config['label'],
+                    'icon' => $config['icon'],
+                    'color' => $config['color'],
                     'id' => $record->getKey(),
                     'name' => ($config['name'])($record),
                     'identifier' => ($config['identifier'])($record),
@@ -122,6 +165,15 @@ class Trash extends Page
         $sorted = $rows
             ->sortByDesc(fn (array $row) => optional($row['deleted_at'])->timestamp ?? 0)
             ->values();
+
+        // The header cards describe the whole trash, not the page being looked
+        // at, so they are taken here where the full collection is still in
+        // hand instead of costing a second pass over every module.
+        $this->summary = [
+            'total' => $sorted->count(),
+            'modules' => $sorted->pluck('module')->unique()->count(),
+            'latest' => optional($sorted->first()['deleted_at'] ?? null)?->format('Y-m-d H:i'),
+        ];
 
         $page = $this->getPage();
         $items = $sorted->forPage($page, $this->perPage)->values();

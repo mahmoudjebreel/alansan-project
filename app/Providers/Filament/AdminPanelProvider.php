@@ -3,11 +3,14 @@
 namespace App\Providers\Filament;
 
 use App\Settings\GeneralSettings;
+use App\Support\MuacClassifier;
+use App\Filament\Pages\Auth\Login;
 use App\Filament\Pages\EditProfile;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Enums\ThemeMode;
 use Filament\Navigation\NavigationGroup;
 use Filament\Pages\Dashboard;
 use App\Http\Middleware\SetLocale;
@@ -15,6 +18,7 @@ use Filament\Navigation\MenuItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Enums\Width;
 use Filament\Widgets\AccountWidget;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\Facades\Blade;
@@ -24,10 +28,10 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use Throwable;
 
 class AdminPanelProvider extends PanelProvider
 {
-    private const FALLBACK_SITE_NAME = 'أرض الإنسان - نظام المسح التغذوي';
 
     public function panel(Panel $panel): Panel
     {
@@ -35,11 +39,15 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->login()
+            ->login(Login::class)
             ->databaseNotifications()
             ->profile(EditProfile::class, isSimple: false)
             ->brandName(fn (): string => self::siteName())
-            ->favicon(secure_asset('favicon.svg'))
+            // Both fall back to what the panel shipped with when the operator
+            // has not uploaded anything, so a fresh install still has a mark.
+            ->brandLogo(fn (): ?string => app(GeneralSettings::class)->logoUrl())
+            ->brandLogoHeight('2.5rem')
+            ->favicon(fn (): string => app(GeneralSettings::class)->faviconUrl() ?? secure_asset('favicon.svg'))
             ->colors(fn (): array => [
                 'primary' => Color::hex(app(GeneralSettings::class)->primary_color),
                 'danger' => Color::Rose,
@@ -49,15 +57,44 @@ class AdminPanelProvider extends PanelProvider
                 'warning' => Color::Amber,
             ])
             ->font('Tajawal')
+            ->defaultThemeMode(self::themeMode())
+            // The listings are wide - six modules of thirty-odd columns - so
+            // the content area is given the full width rather than the default
+            // centred column that left the tables scrolling inside a gutter.
+            ->maxContentWidth(Width::Full)
             ->navigationGroups([
                 NavigationGroup::make()
-                    ->label('لوحة التحكم'),
+                    ->label(fn (): string => __('ui.nav.dashboard'))
+                    ->icon('heroicon-o-home'),
                 NavigationGroup::make()
-                    ->label('إدارة البيانات'),
+                    ->label(fn (): string => __('ui.nav.data'))
+                    ->icon('heroicon-o-folder')
+                    ->collapsible(),
                 NavigationGroup::make()
-                    ->label('إدارة النظام'),
+                    ->label(fn (): string => __('ui.nav.system'))
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->collapsible(),
+                // The reporting, backup and trash screens each get their own
+                // section rather than being three more links at the bottom of
+                // system management: they are separate jobs, done by different
+                // people, and looking for the trash under "settings" is not
+                // where anybody looks first.
+                NavigationGroup::make()
+                    ->label(fn (): string => __('ui.nav.reports'))
+                    ->icon('heroicon-o-document-chart-bar')
+                    ->collapsible(),
+                NavigationGroup::make()
+                    ->label(fn (): string => __('ui.nav.backup'))
+                    ->icon('heroicon-o-circle-stack')
+                    ->collapsible(),
+                NavigationGroup::make()
+                    ->label(fn (): string => __('ui.nav.trash'))
+                    ->icon('heroicon-o-trash')
+                    ->collapsible(),
             ])
             ->sidebarCollapsibleOnDesktop()
+            ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
+            ->unsavedChangesAlerts()
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->pages([
@@ -78,153 +115,29 @@ class AdminPanelProvider extends PanelProvider
                     ->sort(1),
             ])
             ->renderHook(
+                // Above the heading, not between it and the form: the brand is
+                // what the page opens with, and putting it lower left the site
+                // name printed twice with the greeting in between.
+                PanelsRenderHook::SIMPLE_PAGE_START,
+                fn (): string => view('filament.auth.login-brand', [
+                    'siteName' => self::siteName(),
+                    'tagline' => app(GeneralSettings::class)->login_tagline,
+                    'logoUrl' => app(GeneralSettings::class)->logoUrl(),
+                ])->render()
+            )
+            ->renderHook(
                 PanelsRenderHook::BODY_END,
-                fn (): string => Blade::render('
-                    <script src="{{ asset(\'vendor/sweetalert2/sweetalert2.all.min.js\') }}"></script>
-                    <script>
-                        // ---------------------------------------------------------------
-                        // Centralized, theme-aware SweetAlert2 helpers, reused by every
-                        // destructive action across the dashboard (Trash, Backups, ...).
-                        // Defined once here so pages never duplicate SweetAlert config.
-                        // ---------------------------------------------------------------
-                        const dashboardPrimaryColor = @js($primaryColor);
-
-                        window.dashboardIsDark = function () {
-                            return document.documentElement.classList.contains("dark");
-                        };
-
-                        // Styled confirmation dialog. Returns the SweetAlert2 promise.
-                        window.dashboardConfirm = function (options) {
-                            options = options || {};
-                            return Swal.fire({
-                                title: options.title || "تأكيد",
-                                html: options.text || "",
-                                icon: options.icon || "question",
-                                showCancelButton: true,
-                                confirmButtonText: options.confirmText || "نعم",
-                                cancelButtonText: options.cancelText || "إلغاء",
-                                confirmButtonColor: options.danger ? "#dc2626" : dashboardPrimaryColor,
-                                cancelButtonColor: "#6b7280",
-                                reverseButtons: true,
-                                focusCancel: options.danger === true,
-                                background: window.dashboardIsDark() ? "#1f2937" : "#ffffff",
-                                color: window.dashboardIsDark() ? "#f9fafb" : "#111827",
-                            });
-                        };
-
-                        // Lightweight success/error toast.
-                        window.dashboardToast = function (icon, title) {
-                            Swal.fire({
-                                toast: true,
-                                position: "top-start",
-                                icon: icon || "success",
-                                title: title || "",
-                                showConfirmButton: false,
-                                timer: 3000,
-                                timerProgressBar: true,
-                                background: window.dashboardIsDark() ? "#1f2937" : "#ffffff",
-                                color: window.dashboardIsDark() ? "#f9fafb" : "#111827",
-                            });
-                        };
-
-                        // Confirm, then run a Livewire method. The $wire reference is
-                        // captured synchronously as an argument, so the call still works
-                        // inside the async .then() (Alpine magics are not reliable there).
-                        window.confirmAction = function ($wire, method, params, options) {
-                            options = options || {};
-                            return window.dashboardConfirm(options).then((result) => {
-                                if (! result.isConfirmed) {
-                                    return;
-                                }
-
-                                return Promise.resolve($wire.call(method, ...(params || []))).then((ok) => {
-                                    if (ok === false) {
-                                        window.dashboardToast("error", options.errorText || "تعذّر تنفيذ العملية");
-                                    } else if (options.successText) {
-                                        window.dashboardToast("success", options.successText);
-                                    }
-                                });
-                            });
-                        };
-
-                        window.addEventListener("show-duplicate-visit-alert", event => {
-                            const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
-                            // Only the pregnant/lactating module sends a previous
-                            // status; the row is skipped everywhere else.
-                            let statusHtml = "";
-                            if (detail.last_status_type) {
-                                statusHtml = `<p style="margin-bottom: 8px; color: #374151;"><strong>حالة الأم السابقة:</strong> <span style="color: #7c3aed; font-weight: bold;">${detail.last_status_type}</span></p>`;
-                            }
-                            let warningHtml = "";
-                            if (detail.visit_type_warning) {
-                                warningHtml = `<p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; border-right: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">${detail.visit_type_warning}</p>`;
-                            }
-                            Swal.fire({
-                                title: detail.title || "تنبيه: البيانات مسجلة مسبقاً",
-                                html: `
-                                    <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>تاريخ آخر زيارة:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.last_visit_date}</span></p>
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>نوع الزيارة السابقة:</strong> <span style="color: #059669; font-weight: bold;">${detail.last_visit_type}</span></p>
-                                        ${statusHtml}
-                                        ${warningHtml}
-                                    </div>
-                                `,
-                                icon: detail.visit_type_warning ? "warning" : "info",
-                                showCancelButton: true,
-                                confirmButtonText: detail.confirm_button_text || "إضافة نفس البيانات",
-                                cancelButtonText: "تخطي",
-                                confirmButtonColor: "#2563eb",
-                                cancelButtonColor: "#6b7280",
-                                reverseButtons: true,
-                                allowOutsideClick: false,
-                                allowEscapeKey: false
-                            }).then((result) => {
-                                if (result.isConfirmed) {
-                                    if (detail.action_type === "fill_child") {
-                                        Livewire.dispatch("fillChildDataFromAlert", { data: detail.record_data });
-                                    } else if (detail.action_type === "fill_mother") {
-                                        Livewire.dispatch("fillMotherDataFromAlert", { data: detail.record_data });
-                                    }
-                                } else if (result.dismiss === Swal.DismissReason.cancel) {
-                                    window.location.href = detail.index_url;
-                                }
-                            });
-                        });
-
-                        // Group sessions: the ID number is already registered on an
-                        // active session. Same visual style as the alert above, with
-                        // the session subject added and only two outcomes - prefill
-                        // the participant data, or leave for the listing.
-                        window.addEventListener("show-group-session-duplicate-alert", event => {
-                            const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
-                            Swal.fire({
-                                title: detail.title || "رقم الهوية مسجل مسبقاً",
-                                html: `
-                                    <div style="text-align: right; font-family: Tajawal, sans-serif; direction: rtl; font-size: 16px; line-height: 1.8;">
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>تاريخ آخر جلسة:</strong> <span style="color: #2563eb; font-weight: bold;">${detail.last_session_date}</span></p>
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>نوع الزيارة:</strong> <span style="color: #059669; font-weight: bold;">${detail.last_visit_type}</span></p>
-                                        <p style="margin-bottom: 8px; color: #374151;"><strong>اسم الجلسة:</strong> <span style="color: #7c3aed; font-weight: bold;">${detail.last_session_subject}</span></p>
-                                    </div>
-                                `,
-                                icon: "info",
-                                showCancelButton: true,
-                                confirmButtonText: detail.confirm_button_text || "جلب البيانات",
-                                cancelButtonText: detail.close_button_text || "إغلاق",
-                                confirmButtonColor: "#2563eb",
-                                cancelButtonColor: "#6b7280",
-                                reverseButtons: true,
-                                allowOutsideClick: false,
-                                allowEscapeKey: false
-                            }).then((result) => {
-                                if (result.isConfirmed) {
-                                    Livewire.dispatch("fillGroupSessionDataFromAlert", { data: detail.record_data });
-                                } else {
-                                    window.location.href = detail.index_url;
-                                }
-                            });
-                        });
-                    </script>
-                ', ['primaryColor' => app(GeneralSettings::class)->primary_color])
+                fn (): string => view('filament.scripts.dashboard-alerts', [
+                    'primaryColor' => app(GeneralSettings::class)->primary_color,
+                    'keepAliveUrl' => route('session.keep-alive'),
+                    'keepAliveSeconds' => self::keepAliveSeconds(),
+                    // The referral prompt classifies the reading in the
+                    // browser, so it needs the same cut-offs PHP applies.
+                    'muacThresholds' => [
+                        'sam_max' => MuacClassifier::SAM_MAX_MM,
+                        'mam_max' => MuacClassifier::MAM_MAX_MM,
+                    ],
+                ])->render()
             )
             ->middleware([
                 EncryptCookies::class,
@@ -243,14 +156,62 @@ class AdminPanelProvider extends PanelProvider
             ]);
     }
 
+    /**
+     * How often an open tab pings the session, in seconds.
+     *
+     * Derived from the configured session lifetime rather than fixed, so
+     * shortening SESSION_LIFETIME cannot leave the ping arriving after the
+     * session it was meant to keep alive has already gone. A third of the
+     * lifetime means two pings are missed before anything expires, and the
+     * floor keeps a misconfigured lifetime from turning this into a flood.
+     */
+    private static function keepAliveSeconds(): int
+    {
+        $lifetimeSeconds = ((int) config('session.lifetime', 120)) * 60;
+
+        return max(60, (int) floor($lifetimeSeconds / 3));
+    }
+
+    /**
+     * The theme the panel opens on, from the settings page.
+     *
+     * Filament takes the mode itself rather than a closure, so this is read
+     * while the panel is being defined - which also happens during `migrate`
+     * on a database that has no settings table yet. An unreadable setting, or
+     * one holding an unrecognised value, falls back to following the operating
+     * system rather than taking the whole application down.
+     */
+    private static function themeMode(): ThemeMode
+    {
+        try {
+            $mode = app(GeneralSettings::class)->default_theme;
+        } catch (Throwable) {
+            return ThemeMode::System;
+        }
+
+        return match ($mode) {
+            'light' => ThemeMode::Light,
+            'dark' => ThemeMode::Dark,
+            default => ThemeMode::System,
+        };
+    }
+
+    /**
+     * The brand name, from the settings page.
+     *
+     * The mojibake check catches a site name that was written to the database
+     * through a mis-encoded connection: rather than printing the wreckage
+     * across every page, the panel falls back to its own name.
+     */
     private static function siteName(): string
     {
+        $fallback = __('ui.site.fallback_name');
         $siteName = app(GeneralSettings::class)->site_name;
 
         if (str_contains($siteName, '╪') || str_contains($siteName, '┘')) {
-            return self::FALLBACK_SITE_NAME;
+            return $fallback;
         }
 
-        return $siteName ?: self::FALLBACK_SITE_NAME;
+        return $siteName ?: $fallback;
     }
 }

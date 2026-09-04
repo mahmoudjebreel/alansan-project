@@ -306,17 +306,62 @@ final class ImportSchema
             }
         }
 
+        // The message names the cell that was refused as well as what would
+        // have been accepted. Without the value, an uploader looking at a
+        // sheet of eighteen hundred rows is told a column is wrong somewhere
+        // and left to find it.
         return [
             'ok' => false,
             'message' => __('fields.import_invalid_option', [
+                'value' => is_scalar($value) ? trim((string) $value) : '—',
                 'field' => __('fields.' . $field),
-                'allowed' => collect($options)->map(fn ($label, $raw) => (string) $label)->implode(' / '),
+                'allowed' => $this->acceptedSpellings($field, $options),
             ]),
         ];
     }
 
+    /**
+     * Everything a file may legitimately write in this column: the Select's
+     * own labels plus the spellings the module accepts as aliases of them.
+     *
+     * Listing only the labels was misleading on a module with a synonym map -
+     * it told an uploader that "Breastfeeding" was not allowed while the
+     * importer was perfectly willing to read it.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    private function acceptedSpellings(string $field, array $options): string
+    {
+        $labels = collect($options)
+            ->map(fn ($label): string => (string) $label)
+            ->values();
+
+        $aliases = collect(array_keys($this->definition->synonyms[$field] ?? []))
+            ->map(fn ($alias): string => (string) $alias);
+
+        return $labels
+            ->merge($aliases)
+            ->unique(fn (string $spelling): string => $this->normalise($spelling))
+            ->implode(' / ');
+    }
+
     private function castDate(string $field, mixed $value): array
     {
+        // A module may read its own hand-typed date cells first. Excel serials
+        // never reach it: the branch below already turns those into dates
+        // correctly, and there is nothing ambiguous about a number.
+        $reader = $this->definition->dateReader;
+
+        if ($reader !== null && ! is_numeric($value)) {
+            $value = $reader::normalise($field, $value);
+
+            // The reader dropped an unreadable cell in a column where that
+            // costs the cell rather than the whole row.
+            if ($value === null) {
+                return ['ok' => true, 'value' => null];
+            }
+        }
+
         try {
             if (is_numeric($value)) {
                 return ['ok' => true, 'value' => Carbon::instance(ExcelDate::excelToDateTimeObject((float) $value))->startOfDay()];

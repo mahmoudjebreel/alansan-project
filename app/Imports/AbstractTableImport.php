@@ -231,6 +231,12 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
             }
         }
 
+        // Recompute what the system decides for itself before validating, so a
+        // derived NOT NULL column counts as filled even when the sheet left it
+        // blank - and so a value the sheet did state is replaced rather than
+        // trusted.
+        $attributes = $this->definition->derive($attributes);
+
         $messages = array_merge($messages, $this->validateRow($attributes, $rejected));
 
         // A visit needs a date to be meaningful; drop empty placeholders.

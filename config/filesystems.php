@@ -47,6 +47,24 @@ return [
             'report' => false,
         ],
 
+        /*
+         * Images uploaded through the panel: avatars and the branding.
+         *
+         * Rooted in public/ rather than storage/ because the server this is
+         * deployed to has no terminal, so `php artisan storage:link` is never
+         * run there and anything behind that symlink is unreachable. The URL
+         * is root-relative for the same reason APP_URL cannot be trusted to
+         * match the host the panel is actually being browsed at.
+         */
+        'uploads' => [
+            'driver' => 'local',
+            'root' => public_path('uploads'),
+            'url' => '/uploads',
+            'visibility' => 'public',
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

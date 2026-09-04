@@ -2,10 +2,13 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\Forms\DigitStringField;
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\FollowUpChildResource\Pages;
 use App\Models\FollowUpChild;
 use App\Support\FilamentInfolist;
+use App\Support\MuacClassifier;
 use Filament\Forms;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -26,7 +29,10 @@ class FollowUpChildResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-clipboard-document-check';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
@@ -55,17 +61,31 @@ class FollowUpChildResource extends Resource
         return parent::getEloquentQuery()->with('visits');
     }
 
+    /**
+     * Follow-up records are opened by the Children module when a screening
+     * comes back MAM or SAM, never by hand.
+     *
+     * Creating one manually meant a child could be under treatment with no
+     * screening behind them, which every report that joins the two modules
+     * then had to guess about. The Excel import is unaffected: it carries
+     * historical episodes that were recorded before this system existed.
+     */
+    public static function canCreate(): bool
+    {
+        return false;
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->schema([
             \Filament\Schemas\Components\Tabs::make('FollowUpChildTabs')
                 ->tabs([
-                    \Filament\Schemas\Components\Tabs\Tab::make('بيانات متابعة الطفل')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.follow_up_child_data'))
                         ->icon('heroicon-o-user')
                         ->schema([
                             static::getFollowUpChildDataSection(),
                         ]),
-                    \Filament\Schemas\Components\Tabs\Tab::make('الزيارات الجارية والمتابعة')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.ongoing_visits'))
                         ->icon('heroicon-o-clipboard-document-check')
                         ->schema([
                             static::getVisitsSection(),
@@ -82,12 +102,13 @@ class FollowUpChildResource extends Resource
                 Forms\Components\TextInput::make('id_number')
                     ->label(__('fields.id_number'))
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهوية مطلوب.',
-                        'numeric' => 'رقم الهوية يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهوية يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.identity_required'),
+                        'regex' => __('ui.validation.identity_digits'),
                     ])
                     ->maxLength(255),
                 Forms\Components\TextInput::make('child_name')
@@ -120,7 +141,9 @@ class FollowUpChildResource extends Resource
                 Forms\Components\TextInput::make('mobile_number')
                     ->label(__('fields.mobile_number'))
                     ->tel()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->required()
                     ->maxLength(255),
                 Forms\Components\TextInput::make('shelter_name')
@@ -225,8 +248,12 @@ class FollowUpChildResource extends Resource
                                 ->label(__('fields.visit_number')),
                             FilamentInfolist::date('visit_date'),
                             FilamentInfolist::text('muac'),
+                            TextEntry::make('fi')
+                                ->label(__('fields.fi'))
+                                ->badge()
+                                ->color(fn (?string $state): string => MuacClassifier::color($state)),
                         ])
-                        ->columns(3),
+                        ->columns(4),
                 ]),
         ]);
     }
@@ -238,17 +265,17 @@ class FollowUpChildResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('id_number')
                     ->label(__('fields.id_number'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::identifier('id_number')),
                 Tables\Columns\TextColumn::make('child_name')
                     ->label(__('fields.child_name'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::name('child_name')),
                 Tables\Columns\TextColumn::make('sex')
                     ->label(__('fields.sex'))
                     ->badge()
                     ->formatStateUsing(fn (?string $state): ?string => filled($state) ? __('fields.' . $state) : null),
                 Tables\Columns\TextColumn::make('shelter_name')
                     ->label(__('fields.shelter_name'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::name('shelter_name')),
                 Tables\Columns\TextColumn::make('admission_date')
                     ->label(__('fields.admission_date'))
                     ->date()
@@ -279,12 +306,14 @@ class FollowUpChildResource extends Resource
                     ->label(__('fields.latest_muac'))
                     ->state(fn (FollowUpChild $record): mixed => $record->latest_muac)
                     ->badge()
-                    ->color(fn ($state): string => match (\App\Models\Child::classifyMuac($state)) {
-                        'SAM' => 'danger',
-                        'MAM' => 'warning',
-                        'Normal' => 'success',
-                        default => 'gray',
-                    }),
+                    ->color(fn ($state): string => MuacClassifier::color(MuacClassifier::classify($state))),
+                Tables\Columns\TextColumn::make('record_state')
+                    ->label(__('fields.record_state'))
+                    ->state(fn (FollowUpChild $record): string => $record->isLocked()
+                        ? __('fields.record_locked')
+                        : __('fields.record_active'))
+                    ->badge()
+                    ->color(fn (FollowUpChild $record): string => $record->isLocked() ? 'gray' : 'success'),
             ])
             ->defaultSort('admission_date', 'desc')
             ->filters([
@@ -323,7 +352,7 @@ class FollowUpChildResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

@@ -43,6 +43,10 @@ class FollowUpChildrenExport extends AbstractTableExport
         foreach (range(1, $this->maxVisits()) as $i) {
             $headings[] = __('fields.visit_date_n', ['n' => $i]);
             $headings[] = __('fields.visit_muac_n', ['n' => $i]);
+            // FI is the reading the programme actually reports on, so it is
+            // exported next to the measurement rather than left to the reader
+            // to classify by hand.
+            $headings[] = __('fields.visit_fi_n', ['n' => $i]);
         }
 
         return $headings;
@@ -58,6 +62,7 @@ class FollowUpChildrenExport extends AbstractTableExport
             $visit = $visits->get($i);
             $row[] = $visit?->visit_date?->format('Y-m-d');
             $row[] = $visit?->muac;
+            $row[] = $visit?->fi;
         }
 
         return $row;

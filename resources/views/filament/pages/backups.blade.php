@@ -2,17 +2,33 @@
     @php
         $latestBackup = $this->getLatestBackup();
         $allBackups = $this->getAllBackupFiles();
+
+        // Blade does not compile directives inside a component's attributes,
+        // so `@js(...)` in an x-on:click would reach the browser verbatim and
+        // break the handler. The expression is assembled here instead and
+        // bound as PHP, the same way the cache page does it.
+        $confirmDelete = fn (string $path): string => 'confirmAction($wire, "deleteBackup", ['
+            . json_encode($path, JSON_UNESCAPED_UNICODE) . '], '
+            . json_encode([
+                'title' => __('ui.backups.confirm_delete.title'),
+                'text' => __('ui.backups.confirm_delete.text'),
+                'icon' => 'warning',
+                'danger' => true,
+                'confirmText' => __('ui.backups.confirm_delete.confirm'),
+                'successText' => __('ui.backups.confirm_delete.success'),
+                'errorText' => __('ui.backups.confirm_delete.error'),
+            ], JSON_UNESCAPED_UNICODE) . ')';
     @endphp
 
     <div class="fi-page-content space-y-6">
         {{-- ============ Latest Backup Section ============ --}}
         <x-filament::section icon="heroicon-o-circle-stack" icon-color="primary">
             <x-slot name="heading">
-                أحدث نسخة احتياطية لقاعدة البيانات
+                {{ __('ui.backups.latest_heading') }}
             </x-slot>
 
             <x-slot name="description">
-                حفظ وتنزيل النسخة الاحتياطية المباشرة بصيغة SQL لحماية بيانات المركز من الضياع.
+                {{ __('ui.backups.latest_description') }}
             </x-slot>
 
             <x-slot name="headerEnd">
@@ -24,7 +40,7 @@
                         icon="heroicon-o-arrow-down-tray"
                         wire:click="downloadBackup('{{ addslashes($latestBackup['path']) }}')"
                     >
-                        تنزيل أحدث نسخة ({{ $latestBackup['size'] }})
+                        {{ __('ui.backups.download_latest', ['size' => $latestBackup['size']]) }}
                     </x-filament::button>
                 @endif
             </x-slot>
@@ -35,7 +51,7 @@
                         <div class="flex items-center gap-3">
                             <x-filament::icon icon="heroicon-o-calendar" class="h-5 w-5 text-primary-500" />
                             <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">تاريخ والتوقيت</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ __('ui.backups.datetime') }}</p>
                                 <p class="font-semibold text-gray-900 dark:text-white">{{ $latestBackup['date'] }}</p>
                             </div>
                         </div>
@@ -45,7 +61,7 @@
                         <div class="flex items-center gap-3">
                             <x-filament::icon icon="heroicon-o-server" class="h-5 w-5 text-success-500" />
                             <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">حجم الملف</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ __('ui.backups.size') }}</p>
                                 <x-filament::badge color="success">{{ $latestBackup['size'] }}</x-filament::badge>
                             </div>
                         </div>
@@ -55,7 +71,7 @@
                         <div class="flex items-center gap-3">
                             <x-filament::icon icon="heroicon-o-document-text" class="h-5 w-5 text-info-500" />
                             <div class="min-w-0">
-                                <p class="text-xs text-gray-500 dark:text-gray-400">اسم الملف</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ __('ui.backups.filename') }}</p>
                                 <p class="truncate font-mono text-xs font-semibold text-gray-900 dark:text-white">{{ $latestBackup['name'] }}</p>
                             </div>
                         </div>
@@ -63,7 +79,7 @@
                 </div>
             @else
                 <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                    لا توجد أي نسخة احتياطية حالياً. اضغط على الزر في الأعلى لإنشاء نسخة.
+                    {{ __('ui.backups.none_yet') }}
                 </div>
             @endif
         </x-filament::section>
@@ -71,11 +87,11 @@
         {{-- ============ All Backups Table Section ============ --}}
         <x-filament::section icon="heroicon-o-archive-box" icon-color="gray">
             <x-slot name="heading">
-                أرشيف النسخ الاحتياطية المحفوظة ({{ count($allBackups) }})
+                {{ __('ui.backups.archive_heading') }} ({{ count($allBackups) }})
             </x-slot>
 
             <x-slot name="description">
-                سجل متكامل بجميع الملفات المحفوظة للتنزيل أو الحذف النهائي.
+                {{ __('ui.backups.archive_description') }}
             </x-slot>
 
             @if(count($allBackups) > 0)
@@ -83,10 +99,10 @@
                     <table class="fi-ta-table w-full text-start divide-y divide-gray-200 dark:divide-white/10">
                         <thead class="bg-gray-50/50 dark:bg-white/5">
                             <tr>
-                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">اسم ملف النسخة (SQL)</th>
-                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">تاريخ الإنشاء والتوقيت</th>
-                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">حجم الملف</th>
-                                <th class="fi-ta-header-cell px-4 py-3.5 text-center font-semibold text-gray-950 dark:text-white">الإجراءات والتحكم</th>
+                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">{{ __('ui.backups.col_filename') }}</th>
+                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">{{ __('ui.backups.col_created') }}</th>
+                                <th class="fi-ta-header-cell px-4 py-3.5 text-start font-semibold text-gray-950 dark:text-white">{{ __('ui.backups.col_size') }}</th>
+                                <th class="fi-ta-header-cell px-4 py-3.5 text-center font-semibold text-gray-950 dark:text-white">{{ __('ui.backups.col_actions') }}</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-white/10">
@@ -116,7 +132,7 @@
                                                 icon="heroicon-o-arrow-down-tray"
                                                 wire:click="downloadBackup('{{ addslashes($file['path']) }}')"
                                             >
-                                                تحميل
+                                                {{ __('ui.backups.download') }}
                                             </x-filament::button>
 
                                             <x-filament::button
@@ -124,17 +140,9 @@
                                                 size="xs"
                                                 color="danger"
                                                 icon="heroicon-o-trash"
-                                                x-on:click="confirmAction($wire, 'deleteBackup', ['{{ addslashes($file['path']) }}'], {
-                                                    title: 'حذف النسخة الاحتياطية',
-                                                    text: 'هل أنت متأكد من حذف هذه النسخة الاحتياطية؟ لا يمكن التراجع عن هذا الإجراء.',
-                                                    icon: 'warning',
-                                                    danger: true,
-                                                    confirmText: 'نعم، احذف',
-                                                    successText: 'تم حذف النسخة الاحتياطية بنجاح',
-                                                    errorText: 'تعذّر حذف النسخة الاحتياطية'
-                                                })"
+                                                :x-on:click="$confirmDelete($file['path'])"
                                             >
-                                                حذف
+                                                {{ __('ui.backups.delete') }}
                                             </x-filament::button>
                                         </div>
                                     </td>
@@ -145,7 +153,7 @@
                 </div>
             @else
                 <div class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                    لا توجد نسخ احتياطية محفوظة في الوقت الحالي.
+                    {{ __('ui.backups.archive_empty') }}
                 </div>
             @endif
         </x-filament::section>

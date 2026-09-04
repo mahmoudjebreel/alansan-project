@@ -19,15 +19,24 @@ class CacheManagement extends Page
 {
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-bolt';
 
-    protected static ?string $navigationLabel = 'إدارة الكاش';
-
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $title = 'إدارة الكاش';
-
     protected static ?int $navigationSort = 22;
 
     protected string $view = 'filament.pages.cache-management';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.cache.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.cache.title');
+    }
 
     public static function canAccess(): bool
     {
@@ -46,36 +55,36 @@ class CacheManagement extends Page
     {
         return [
             'application' => [
-                'label' => 'كاش التطبيق العام',
-                'description' => 'يمسح البيانات المخزَّنة مؤقتاً في نظام الكاش العام (cache:clear).',
+                'label' => __('ui.cache.application.label'),
+                'description' => __('ui.cache.application.description'),
                 'icon' => 'heroicon-o-server-stack',
                 'color' => 'primary',
                 'command' => 'cache:clear',
             ],
             'config' => [
-                'label' => 'كاش الإعدادات',
-                'description' => 'يمسح ملف إعدادات النظام المجمَّع (config:clear).',
+                'label' => __('ui.cache.config.label'),
+                'description' => __('ui.cache.config.description'),
                 'icon' => 'heroicon-o-cog-6-tooth',
                 'color' => 'info',
                 'command' => 'config:clear',
             ],
             'view' => [
-                'label' => 'كاش الفيوهات',
-                'description' => 'يمسح ملفات العرض المُصرَّفة مسبقاً (view:clear).',
+                'label' => __('ui.cache.view.label'),
+                'description' => __('ui.cache.view.description'),
                 'icon' => 'heroicon-o-document-text',
                 'color' => 'warning',
                 'command' => 'view:clear',
             ],
             'route' => [
-                'label' => 'كاش الروابط',
-                'description' => 'يمسح ملف الروابط المجمَّع (route:clear).',
+                'label' => __('ui.cache.route.label'),
+                'description' => __('ui.cache.route.description'),
                 'icon' => 'heroicon-o-link',
                 'color' => 'gray',
                 'command' => 'route:clear',
             ],
             'permissions' => [
-                'label' => 'كاش الصلاحيات والأدوار',
-                'description' => 'يجعل أي تعديل على الأدوار أو الصلاحيات ينعكس فوراً على المستخدمين دون انتظار انتهاء صلاحية الكاش.',
+                'label' => __('ui.cache.permissions.label'),
+                'description' => __('ui.cache.permissions.description'),
                 'icon' => 'heroicon-o-shield-check',
                 'color' => 'success',
                 'command' => null,
@@ -98,8 +107,8 @@ class CacheManagement extends Page
 
         if (! array_key_exists($type, $types)) {
             Notification::make()
-                ->title('نوع كاش غير معروف')
-                ->body('لا يمكن تنفيذ العملية المطلوبة.')
+                ->title(__('ui.cache.unknown_title'))
+                ->body(__('ui.cache.unknown_body'))
                 ->danger()
                 ->send();
 
@@ -110,7 +119,7 @@ class CacheManagement extends Page
             $this->runClear($type);
         } catch (Throwable $e) {
             Notification::make()
-                ->title('فشل مسح ' . $types[$type]['label'])
+                ->title(__('ui.cache.clear_failed', ['label' => $types[$type]['label']]))
                 ->body($e->getMessage())
                 ->danger()
                 ->send();
@@ -119,7 +128,7 @@ class CacheManagement extends Page
         }
 
         Notification::make()
-            ->title('تم مسح ' . $types[$type]['label'] . ' بنجاح')
+            ->title(__('ui.cache.cleared', ['label' => $types[$type]['label']]))
             ->success()
             ->send();
 
@@ -148,10 +157,10 @@ class CacheManagement extends Page
 
         if ($failed !== []) {
             Notification::make()
-                ->title('اكتمل المسح مع وجود أخطاء')
+                ->title(__('ui.cache.partial_title'))
                 ->body(
-                    ($cleared === [] ? '' : 'تم مسح: ' . implode('، ', $cleared) . '. ')
-                    . 'تعذّر مسح: ' . implode('، ', $failed) . '.'
+                    ($cleared === [] ? '' : __('ui.cache.partial_cleared', ['list' => implode(__('ui.cache.separator'), $cleared)]))
+                    . __('ui.cache.partial_failed', ['list' => implode(__('ui.cache.separator'), $failed)])
                 )
                 ->danger()
                 ->persistent()
@@ -161,8 +170,8 @@ class CacheManagement extends Page
         }
 
         Notification::make()
-            ->title('تم مسح كل أنواع الكاش بنجاح')
-            ->body('تم مسح: ' . implode('، ', $cleared) . '.')
+            ->title(__('ui.cache.all_cleared_title'))
+            ->body(__('ui.cache.all_cleared_body', ['list' => implode(__('ui.cache.separator'), $cleared)]))
             ->success()
             ->send();
 
@@ -183,7 +192,7 @@ class CacheManagement extends Page
         $command = static::cacheTypes()[$type]['command'];
 
         if (Artisan::call($command) !== 0) {
-            throw new RuntimeException("انتهى الأمر [{$command}] بحالة فشل.");
+            throw new RuntimeException(__('ui.cache.command_failed', ['command' => $command]));
         }
     }
 
@@ -204,14 +213,14 @@ class CacheManagement extends Page
             Artisan::call('permission:cache-reset');
 
             if ($registrar->getCacheRepository()->has($registrar->cacheKey)) {
-                throw new RuntimeException('ما زال كاش الصلاحيات موجوداً بعد محاولة المسح.');
+                throw new RuntimeException(__('ui.cache.permission_still_cached'));
             }
 
             return;
         }
 
         if (! $registrar->forgetCachedPermissions()) {
-            throw new RuntimeException('تعذّر مسح كاش الصلاحيات والأدوار.');
+            throw new RuntimeException(__('ui.cache.permission_clear_failed'));
         }
     }
 }

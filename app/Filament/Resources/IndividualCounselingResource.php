@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\IndividualCounselingResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
@@ -32,7 +33,10 @@ class IndividualCounselingResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-chat-bubble-left-right';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
@@ -552,9 +556,9 @@ class IndividualCounselingResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('date')->label(__('fields.date'))->date()->sortable(),
-                Tables\Columns\TextColumn::make('child_name')->label(__('fields.child_name'))->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('mother_name')->label(__('fields.mother_name'))->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('mother_id_number')->label(__('fields.mother_id_number'))->searchable(),
+                Tables\Columns\TextColumn::make('child_name')->label(__('fields.child_name'))->searchable(query: RecordSearch::name('child_name'))->sortable(),
+                Tables\Columns\TextColumn::make('mother_name')->label(__('fields.mother_name'))->searchable(query: RecordSearch::name('mother_name'))->sortable(),
+                Tables\Columns\TextColumn::make('mother_id_number')->label(__('fields.mother_id_number'))->searchable(query: RecordSearch::identifier('mother_id_number')),
                 Tables\Columns\TextColumn::make('health_educator')->label(__('fields.health_educator'))->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('child_visit_type')->label(__('fields.child_visit_type'))->badge()->formatStateUsing(fn (?string $state): ?string => filled($state) ? __('fields.' . $state) : null),
                 Tables\Columns\TextColumn::make('gender')->label(__('fields.gender'))->toggleable(isToggledHiddenByDefault: true),
@@ -568,7 +572,7 @@ class IndividualCounselingResource extends Resource
                 YesNoColumn::make('iycf_form_filled')->label(__('fields.iycf_form_filled'))->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('status')->label(__('fields.status'))->badge()->formatStateUsing(fn (?string $state): ?string => filled($state) ? __('fields.' . $state) : null),
                 Tables\Columns\TextColumn::make('outcome')->label(__('fields.outcome'))->badge()->formatStateUsing(fn (?string $state): ?string => filled($state) ? __('fields.' . $state) : null),
-                Tables\Columns\TextColumn::make('shelter_name')->label(__('fields.shelter_name'))->searchable()->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('shelter_name')->label(__('fields.shelter_name'))->searchable(query: RecordSearch::name('shelter_name'))->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('date', 'desc')
             ->filters([
@@ -598,7 +602,7 @@ class IndividualCounselingResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

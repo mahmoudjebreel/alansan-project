@@ -3,6 +3,8 @@
 namespace App\Exports;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\LazyCollection;
+use Mpdf\HTMLParserMode;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -19,6 +21,14 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Column structure and value formatting still come from the module's
  * AbstractTableExport, so the PDF and the spreadsheet can never disagree about
  * what a field is called or how a value is written.
+ *
+ * The document is written to mPDF one record at a time rather than as a single
+ * string. Handing it the whole report at once failed outright past a few
+ * hundred records - "The HTML code size is larger than pcre.backtrack_limit" -
+ * because mPDF parses the markup with PCRE, and the size at which it broke
+ * depended on the server's php.ini rather than on anything the report knew
+ * about. Writing per record also keeps only one record's markup in memory
+ * instead of the entire report.
  */
 class PdfExport
 {
@@ -36,7 +46,33 @@ class PdfExport
         ?array $section = null,
     ): StreamedResponse {
         $pdf = new Mpdf(['format' => 'A4']);
-        $pdf->WriteHTML(self::render($export, $title, $nameField, $section));
+
+        if (app()->getLocale() === 'ar') {
+            // The <html dir> the full-document template carries is not written
+            // in the chunked path, so the direction is set on the document.
+            $pdf->SetDirectionality('rtl');
+        }
+
+        $pdf->WriteHTML(view('pdf.record-styles')->render(), HTMLParserMode::HEADER_CSS);
+        $pdf->WriteHTML('<h1>' . e($title) . '</h1>', HTMLParserMode::HTML_BODY);
+
+        $written = 0;
+
+        foreach (self::records($export, $title, $nameField, $section) as $record) {
+            $pdf->WriteHTML(
+                view('pdf.record-block', ['record' => $record])->render(),
+                HTMLParserMode::HTML_BODY,
+            );
+
+            $written++;
+        }
+
+        if ($written === 0) {
+            $pdf->WriteHTML(
+                '<p class="empty">' . e(__('fields.import_empty_file')) . '</p>',
+                HTMLParserMode::HTML_BODY,
+            );
+        }
 
         $content = $pdf->Output('', Destination::STRING_RETURN);
 
@@ -59,12 +95,34 @@ class PdfExport
         string $nameField,
         ?array $section = null,
     ): string {
+        return view('pdf.record-template', [
+            'title' => $title,
+            'records' => self::records($export, $title, $nameField, $section)->all(),
+            'empty' => __('fields.import_empty_file'),
+        ])->render();
+    }
+
+    /**
+     * The records, shaped for the template, one at a time.
+     *
+     * Lazy on purpose: download() consumes them as it writes, so a report of
+     * ten thousand children never holds ten thousand rendered blocks at once.
+     *
+     * @param  array{title: string, columns: array<int, string>, empty: string, rows: callable}|null  $section
+     * @return LazyCollection<int, array<string, mixed>>
+     */
+    private static function records(
+        AbstractTableExport $export,
+        string $title,
+        string $nameField,
+        ?array $section,
+    ): LazyCollection {
         // The record's own fields, without any per-session column groups the
         // module's map() appends after them for the spreadsheet.
         $fields = $export->fields();
         $labels = array_map(fn (string $field): string => __('fields.' . $field), $fields);
 
-        $records = $export->query()->cursor()->map(function (Model $record) use (
+        return $export->query()->cursor()->map(function (Model $record) use (
             $export, $fields, $labels, $title, $nameField, $section
         ): array {
             $values = array_slice($export->map($record), 0, count($fields));
@@ -83,12 +141,6 @@ class PdfExport
                     'rows' => ($section['rows'])($record),
                 ],
             ];
-        })->all();
-
-        return view('pdf.record-template', [
-            'title' => $title,
-            'records' => $records,
-            'empty' => __('fields.import_empty_file'),
-        ])->render();
+        });
     }
 }

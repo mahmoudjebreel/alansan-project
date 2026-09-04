@@ -18,11 +18,20 @@ class UserResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-users';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة النظام';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
 
-    protected static string|null $modelLabel = 'مستخدم';
+    public static function getModelLabel(): string
+    {
+        return __('ui.users.singular');
+    }
 
-    protected static string|null $pluralModelLabel = 'المستخدمون';
+    public static function getPluralModelLabel(): string
+    {
+        return __('ui.users.plural');
+    }
 
     public static function canAccess(): bool
     {
@@ -44,22 +53,22 @@ class UserResource extends Resource
     {
         return [
             \Filament\Forms\Components\TextInput::make('name')
-                ->label('الاسم')
+                ->label(__('ui.users.name'))
                 ->required()
                 ->maxLength(255),
             \Filament\Forms\Components\TextInput::make('email')
-                ->label('البريد الإلكتروني')
+                ->label(__('ui.users.email'))
                 ->email()
                 ->required()
                 ->maxLength(255)
                 ->unique(ignoreRecord: true)
                 ->validationMessages([
-                    'required' => 'البريد الإلكتروني مطلوب.',
-                    'email' => 'يرجى إدخال بريد إلكتروني صحيح.',
-                    'unique' => 'البريد الإلكتروني مستخدم مسبقاً.',
+                    'required' => __('ui.validation.email_required'),
+                    'email' => __('ui.validation.email_invalid'),
+                    'unique' => __('ui.validation.email_taken'),
                 ]),
             \Filament\Forms\Components\TextInput::make('password')
-                ->label('كلمة المرور')
+                ->label(__('ui.users.password'))
                 ->password()
                 ->required(fn (string $context): bool => $context === 'create')
                 ->dehydrateStateUsing(fn ($state) => Hash::make($state))
@@ -67,12 +76,12 @@ class UserResource extends Resource
                 ->maxLength(255)
                 ->same('password_confirmation'),
             \Filament\Forms\Components\TextInput::make('password_confirmation')
-                ->label('تأكيد كلمة المرور')
+                ->label(__('ui.users.password_confirmation'))
                 ->password()
                 ->required(fn (string $context): bool => $context === 'create')
                 ->dehydrated(false),
             \Filament\Forms\Components\FileUpload::make('avatar')
-                ->label('الصورة الشخصية')
+                ->label(__('ui.users.avatar'))
                 ->image()
                 ->avatar()
                 ->disk('public')
@@ -81,7 +90,7 @@ class UserResource extends Resource
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(2048),
             \Filament\Forms\Components\Select::make('roles')
-                ->label('الأدوار')
+                ->label(__('ui.users.roles'))
                 ->multiple()
                 ->relationship('roles', 'name')
                 ->preload(),
@@ -95,20 +104,20 @@ class UserResource extends Resource
                 // Uses the User::$avatar_url accessor so the URL is built in one
                 // place only (profile page, header, sidebar and this table).
                 Tables\Columns\ImageColumn::make('avatar_url')
-                    ->label('الصورة')
+                    ->label(__('ui.users.avatar_short'))
                     ->circular(),
                 Tables\Columns\TextColumn::make('name')
-                    ->label('الاسم')
+                    ->label(__('ui.users.name'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('email')
-                    ->label('البريد الإلكتروني')
+                    ->label(__('ui.users.email'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('roles.name')
-                    ->label('الأدوار')
+                    ->label(__('ui.users.roles'))
                     ->badge()
                     ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('تاريخ الإنشاء')
+                    ->label(__('ui.users.created_at'))
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),

@@ -3,13 +3,30 @@
 namespace App\Filament\Resources\ChildResource\Pages;
 
 use App\Filament\Resources\ChildResource;
+use App\Filament\Resources\FollowUpChildResource;
+use App\Models\Child;
+use App\Models\FollowUpChild;
 use App\Support\ChildDuplicateChecker;
+use App\Support\ChildFollowUpTransfer;
+use App\Support\MuacClassifier;
+use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Livewire\Attributes\On;
 
 class CreateChild extends CreateRecord
 {
     protected static string $resource = ChildResource::class;
+
+    /**
+     * Set from the browser when the screener answers the SAM/MAM prompt.
+     *
+     * It defaults to false so that every path which never sees the prompt -
+     * a test, a console command, a future API - keeps referring automatically,
+     * exactly as it did before the prompt existed. Only an explicit refusal in
+     * the dialog turns it on.
+     */
+    public bool $declineFollowUpReferral = false;
 
     /**
      * Pull the relatively stable data of the last active visit into the form.
@@ -45,5 +62,53 @@ class CreateChild extends CreateRecord
         );
 
         return $data;
+    }
+
+    /**
+     * Every screening is kept in Children whatever it says; a MAM or SAM
+     * reading additionally opens a follow-up episode for the same child.
+     *
+     * The screener is asked about that referral in the browser, the moment the
+     * reading is entered, and the answer arrives here on the save request. A
+     * refusal is a decision rather than an omission, so it is reported back
+     * instead of the save simply passing in silence.
+     */
+    protected function afterCreate(): void
+    {
+        /** @var Child $child */
+        $child = $this->record;
+
+        if ($this->declineFollowUpReferral && MuacClassifier::isMalnourished($child->fi)) {
+            Notification::make()
+                ->title(__('ui.referral.declined'))
+                ->icon('heroicon-o-hand-raised')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $followUpChild = ChildFollowUpTransfer::refer($child);
+
+        if (! $followUpChild instanceof FollowUpChild) {
+            return;
+        }
+
+        Notification::make()
+            ->title(__('fields.referred_to_follow_up_title'))
+            ->body(__('fields.referred_to_follow_up_body', [
+                'name' => $child->name,
+                'fi' => $followUpChild->admitted_with,
+            ]))
+            ->icon('heroicon-o-arrow-right-circle')
+            ->warning()
+            ->persistent()
+            ->actions([
+                Action::make('open')
+                    ->label(__('fields.open_follow_up_record'))
+                    ->url(FollowUpChildResource::getUrl('edit', ['record' => $followUpChild]))
+                    ->button(),
+            ])
+            ->send();
     }
 }

@@ -78,8 +78,23 @@ class ChildDuplicateChecker
      */
     public static function resolveVisitType(mixed $childId, mixed $currentMuacMm = null, ?Model $ignoreRecord = null): string
     {
-        $previous = static::latestActiveVisit($childId, $ignoreRecord);
+        return static::resolveVisitTypeFrom(
+            static::latestActiveVisit($childId, $ignoreRecord),
+            $currentMuacMm,
+        );
+    }
 
+    /**
+     * The same decision, for a caller that has already fetched the previous
+     * visit.
+     *
+     * The duplicate-alert path looks the previous visit up to describe it in
+     * the dialog and then has to settle the visit type from the very same row;
+     * going back through resolveVisitType() ran that lookup a second time on
+     * every blur of the child ID field, on the busiest screen in the system.
+     */
+    public static function resolveVisitTypeFrom(?Child $previous, mixed $currentMuacMm = null): string
+    {
         if (! $previous) {
             return 'new';
         }

@@ -20,10 +20,36 @@ class FollowUpChild extends Model
 
     public const MAX_VISITS = 16;
 
+    /**
+     * The outcome a record carries while the child is still being followed up.
+     * Every other outcome is an exit from the programme.
+     */
+    public const ACTIVE_OUTCOME = 'under_follow_up';
+
+    /**
+     * The outcome that hands the child back to the Children module.
+     */
+    public const CURED_OUTCOME = 'cured';
+
+    /**
+     * Outcomes that close a record. A closed record is read-only: the child
+     * has left the programme and the history of that episode must not move.
+     *
+     * @var array<string>
+     */
+    public const CLOSING_OUTCOMES = [
+        self::CURED_OUTCOME,
+        'defaulted',
+        'discharge_to_opt',
+        'discharge_to_other',
+        'died',
+    ];
+
     protected $fillable = [
         'id_number', 'child_name', 'sex', 'dob', 'age', 'mobile_number',
         'shelter_name', 'governorate', 'causes_of_admission', 'admitted_with',
         'admission_date', 'discharge_date', 'discharge_outcome', 'notes',
+        'source_child_visit_id',
     ];
 
     protected $casts = [
@@ -31,6 +57,22 @@ class FollowUpChild extends Model
         'admission_date' => 'date',
         'discharge_date' => 'date',
     ];
+
+    /**
+     * Whether this episode is closed and the record may no longer be edited.
+     */
+    public function isLocked(): bool
+    {
+        return in_array($this->discharge_outcome, self::CLOSING_OUTCOMES, true);
+    }
+
+    /**
+     * The most recent recorded visit, or null while none exists.
+     */
+    public function latestVisit(): ?FollowUpChildVisit
+    {
+        return $this->visits()->reorder()->orderByDesc('visit_number')->first();
+    }
 
     /**
      * Visits ordered by their sequential visit number (1-16).
@@ -41,13 +83,33 @@ class FollowUpChild extends Model
     }
 
     /**
-     * Remove related visits whenever the child record is deleted (soft or force).
+     * Destroy the recorded visits only when the record itself is destroyed.
+     *
+     * Visits are not soft-deletable, so removing them on an ordinary delete
+     * made a "reversible" delete permanent: the record came back from the
+     * trash with every MUAC reading gone. A soft delete now leaves them in
+     * place and only a force delete clears them.
      */
     protected static function booted(): void
     {
         static::deleting(function (FollowUpChild $child): void {
-            $child->visits()->delete();
+            if ($child->isForceDeleting()) {
+                $child->visits()->delete();
+            }
         });
+    }
+
+    /**
+     * Rows that BulkRecordWriter must clear itself, because the set-based path
+     * deliberately runs with model events switched off.
+     *
+     * Mirrors booted() above: visits go only on a force delete.
+     *
+     * @return array<string, string>  relation name => foreign key column
+     */
+    public function bulkCascades(bool $forceDeleting): array
+    {
+        return $forceDeleting ? ['visits' => 'follow_up_child_id'] : [];
     }
 
     /**
@@ -57,7 +119,7 @@ class FollowUpChild extends Model
      * Both the months and the days come from a single calendar diff of the two
      * dates. Carbon 3 returns a float from diffInYears(), so deriving the
      * months from it separately double-counted the whole months already
-     * carried by the diff and produced values like "11.96 شهر" for a six
+     * carried by the diff and produced values like "11.96 months" for a six
      * month old.
      */
     public static function formatAgeAtAdmission(mixed $dob, mixed $admissionDate): ?string
@@ -80,13 +142,13 @@ class FollowUpChild extends Model
 
         $parts = [];
         if ($totalMonths > 0) {
-            $parts[] = $totalMonths . ' شهر';
+            $parts[] = __('ui.age.months', ['count' => $totalMonths]);
         }
         if ($days > 0) {
-            $parts[] = $days . ' يوم';
+            $parts[] = __('ui.age.days', ['count' => $days]);
         }
 
-        return implode(' و ', $parts) ?: '0 يوم';
+        return implode(__('ui.age.join'), $parts) ?: __('ui.age.zero');
     }
 
     /**

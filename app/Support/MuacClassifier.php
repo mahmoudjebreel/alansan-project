@@ -20,6 +20,12 @@ final class MuacClassifier
 
     public const NORMAL = 'Normal';
 
+    /** A reading at or below this many millimetres is SAM. */
+    public const SAM_MAX_MM = 115;
+
+    /** Below this many millimetres, and above SAM, is MAM. */
+    public const MAM_MAX_MM = 125;
+
     /**
      * Classify a MUAC measurement in millimetres. A blank measurement has no
      * classification at all, which is not the same thing as "Normal".
@@ -33,8 +39,8 @@ final class MuacClassifier
         $muacMm = (float) $muacMm;
 
         return match (true) {
-            $muacMm <= 115 => self::SAM,
-            $muacMm < 125 => self::MAM,
+            $muacMm <= self::SAM_MAX_MM => self::SAM,
+            $muacMm < self::MAM_MAX_MM => self::MAM,
             default => self::NORMAL,
         };
     }

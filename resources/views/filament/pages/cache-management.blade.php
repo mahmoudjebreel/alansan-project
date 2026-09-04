@@ -21,11 +21,11 @@
         {{-- ============ Clear All Section ============ --}}
         <x-filament::section icon="heroicon-o-bolt" icon-color="danger">
             <x-slot name="heading">
-                مسح كل أنواع الكاش دفعة واحدة
+                {{ __('ui.cache.clear_all_heading') }}
             </x-slot>
 
             <x-slot name="description">
-                ينفّذ جميع عمليات المسح بالتسلسل، بما فيها كاش الصلاحيات والأدوار.
+                {{ __('ui.cache.clear_all_description') }}
             </x-slot>
 
             <x-slot name="afterHeader">
@@ -35,31 +35,30 @@
                     color="danger"
                     icon="heroicon-o-bolt"
                     :x-on:click="$confirmJs([
-                        'title' => 'مسح كل أنواع الكاش',
-                        'text' => 'سيتم مسح كاش التطبيق والإعدادات والفيوهات والروابط والصلاحيات. هل تريد المتابعة؟',
+                        'title' => __('ui.cache.clear_all_confirm.title'),
+                        'text' => __('ui.cache.clear_all_confirm.text'),
                         'icon' => 'warning',
                         'danger' => true,
-                        'confirmText' => 'نعم، امسح الكل',
+                        'confirmText' => __('ui.cache.clear_all_confirm.confirm'),
                     ], 'clearAll')"
                 >
-                    مسح كل شيء
+                    {{ __('ui.cache.clear_all_button') }}
                 </x-filament::button>
             </x-slot>
 
             <p class="text-sm text-gray-500 dark:text-gray-400">
-                استخدم هذا الزر بعد تشغيل أي Seeder أو بعد تعديل الأدوار والصلاحيات مباشرة من قاعدة البيانات،
-                ليصبح التغيير سارياً فوراً على كل المستخدمين.
+                {{ __('ui.cache.clear_all_hint') }}
             </p>
         </x-filament::section>
 
         {{-- ============ Individual Cache Types ============ --}}
         <x-filament::section icon="heroicon-o-squares-2x2" icon-color="gray">
             <x-slot name="heading">
-                مسح نوع محدد من الكاش
+                {{ __('ui.cache.specific_heading') }}
             </x-slot>
 
             <x-slot name="description">
-                اختر النوع الذي تريد مسحه فقط، دون التأثير على باقي الأنواع.
+                {{ __('ui.cache.specific_description') }}
             </x-slot>
 
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -96,14 +95,14 @@
                                 :color="$type['color']"
                                 icon="heroicon-o-trash"
                                 :x-on:click="$confirmJs([
-                                    'title' => 'مسح ' . $type['label'],
-                                    'text' => 'هل أنت متأكد من مسح ' . $type['label'] . '؟',
+                                    'title' => __('ui.cache.clear_one_title', ['label' => $type['label']]),
+                                    'text' => __('ui.cache.clear_one_text', ['label' => $type['label']]),
                                     'icon' => 'warning',
                                     'danger' => true,
-                                    'confirmText' => 'نعم، امسح',
+                                    'confirmText' => __('ui.cache.clear_one_confirm'),
                                 ], 'clearCache', [$key])"
                             >
-                                مسح
+                                {{ __('ui.cache.clear_button') }}
                             </x-filament::button>
                         </div>
                     </div>

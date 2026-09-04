@@ -5,7 +5,11 @@ namespace App\Support\Notifications;
 /**
  * The data actions a Super Admin can be notified about, with the presentation
  * each one carries. Kept as one table so the notification, the settings page
- * and the log page can never disagree about labels, colours or priorities.
+ * and the log page can never disagree about colours or priorities.
+ *
+ * The wording lives in lang/*\/ui.php under `notifications.actions`, keyed by
+ * the same action strings, so a notification reads in whichever language the
+ * panel is set to rather than always in Arabic.
  */
 final class ActionType
 {
@@ -19,58 +23,51 @@ final class ActionType
 
     public const EXPORT = 'export';
 
+    public const PDF_EXPORT = 'pdf_export';
+
     public const IMPORT = 'import';
 
     /**
-     * Note the titles for delete and force_delete both start with "حذف سجل",
-     * which is what SuperAdminNotificationTest asserts on.
+     * Presentation that does not change with the language.
      *
-     * @var array<string, array{title: string, verb: string, icon: string, color: string, priority: string}>
+     * @var array<string, array{icon: string, color: string, priority: string}>
      */
     private const MAP = [
         self::CREATE => [
-            'title' => 'إضافة سجل جديد',
-            'verb' => 'بإضافة سجل جديد في',
             'icon' => 'heroicon-o-plus-circle',
             'color' => 'success',
             'priority' => 'low',
         ],
         self::UPDATE => [
-            'title' => 'تعديل سجل',
-            'verb' => 'بتعديل سجل في',
             'icon' => 'heroicon-o-pencil-square',
             'color' => 'warning',
             'priority' => 'medium',
         ],
         self::DELETE => [
-            'title' => 'حذف سجل',
-            'verb' => 'بحذف سجل من',
             'icon' => 'heroicon-o-trash',
             'color' => 'danger',
             'priority' => 'high',
         ],
         self::FORCE_DELETE => [
-            'title' => 'حذف سجل نهائياً',
-            'verb' => 'بالحذف النهائي لسجل من',
             'icon' => 'heroicon-o-fire',
             'color' => 'danger',
             'priority' => 'high',
         ],
         self::EXPORT => [
-            'title' => 'تصدير ملف Excel',
-            'verb' => 'بتصدير ملف Excel من',
             'icon' => 'heroicon-o-arrow-down-tray',
             'color' => 'info',
             'priority' => 'medium',
         ],
+        self::PDF_EXPORT => [
+            'icon' => 'heroicon-o-document-arrow-down',
+            'color' => 'info',
+            'priority' => 'medium',
+        ],
         self::IMPORT => [
-            'title' => 'استيراد ملف Excel',
-            'verb' => 'باستيراد ملف Excel إلى',
             'icon' => 'heroicon-o-arrow-up-tray',
             'color' => 'warning',
             'priority' => 'high',
         ],
-        
     ];
 
     /**
@@ -83,7 +80,7 @@ final class ActionType
 
     /**
      * Action types that are grouped when they repeat in quick succession.
-     * Export and import are already one-per-operation, so they never group.
+     * Exports and imports are already one-per-operation, so they never group.
      *
      * @return array<string>
      */
@@ -97,14 +94,22 @@ final class ActionType
         return array_key_exists($action, self::MAP);
     }
 
+    /**
+     * Note the Arabic titles for delete and force_delete both start with
+     * "حذف سجل", which is what SuperAdminNotificationTest asserts on.
+     */
     public static function title(string $action): string
     {
-        return self::MAP[$action]['title'] ?? $action;
+        return self::exists($action)
+            ? __('ui.notifications.actions.' . $action . '.title')
+            : $action;
     }
 
     public static function verb(string $action): string
     {
-        return self::MAP[$action]['verb'] ?? $action;
+        return self::exists($action)
+            ? __('ui.notifications.actions.' . $action . '.verb')
+            : $action;
     }
 
     public static function icon(string $action): string
@@ -129,6 +134,12 @@ final class ActionType
      */
     public static function options(): array
     {
-        return array_map(fn (array $meta): string => $meta['title'], self::MAP);
+        $options = [];
+
+        foreach (self::all() as $action) {
+            $options[$action] = self::title($action);
+        }
+
+        return $options;
     }
 }

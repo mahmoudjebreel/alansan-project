@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Exports\FollowUpChildrenExport;
+use App\Filament\Resources\ChildResource;
 use App\Filament\Resources\ChildResource\Pages\CreateChild;
+use App\Filament\Resources\ChildResource\Pages\EditChild;
 use App\Filament\Resources\FollowUpChildResource\Pages\EditFollowUpChild;
 use App\Filament\Resources\FollowUpChildResource\Pages\ListFollowUpChildren;
 use App\Filament\Resources\FollowUpChildResource\Pages\ViewFollowUpChild;
@@ -74,8 +76,7 @@ class ChildFollowUpTransferTest extends TestCase
         Livewire::test(CreateChild::class)
             ->fillForm($this->childFormData(130))
             ->call('create')
-            ->assertHasNoFormErrors()
-            ->assertNotDispatched('show-child-referral-alert');
+            ->assertHasNoFormErrors();
 
         $child = Child::firstWhere('child_id', '123456789');
 
@@ -85,32 +86,20 @@ class ChildFollowUpTransferTest extends TestCase
         $this->assertSame(0, FollowUpChild::count());
     }
 
-    public function test_a_malnourished_reading_only_raises_the_confirmation_and_saves_nothing(): void
+    public function test_a_malnourished_reading_is_kept_in_children_and_also_referred(): void
     {
-        Child::factory()->create(['child_id' => '123456789', 'muac_mm' => 130]);
-
         Livewire::test(CreateChild::class)
             ->fillForm($this->childFormData(110))
             ->call('create')
-            ->assertDispatched('show-child-referral-alert');
+            ->assertHasNoFormErrors();
 
-        // Cancelling is simply not answering: nothing was written anywhere.
-        $this->assertSame(1, Child::count());
-        $this->assertSame(0, FollowUpChild::count());
-    }
+        // The screening belongs in Children whatever it said; the referral is
+        // an additional record, not a replacement for it.
+        $child = Child::firstWhere('child_id', '123456789');
 
-    public function test_confirming_the_referral_creates_the_follow_up_record_and_no_children_row(): void
-    {
-        $previous = Child::factory()->create(['child_id' => '123456789', 'muac_mm' => 130]);
-
-        Livewire::test(CreateChild::class)
-            ->fillForm($this->childFormData(110))
-            ->call('create')
-            ->assertDispatched('show-child-referral-alert')
-            ->call('confirmChildReferral');
-
-        // No second Children row for the same reading.
-        $this->assertSame(1, Child::count());
+        $this->assertNotNull($child);
+        $this->assertSame('new', $child->visit_type);
+        $this->assertSame('SAM', $child->fi);
 
         $followUp = FollowUpChild::with('visits')->firstWhere('id_number', '123456789');
 
@@ -122,7 +111,9 @@ class ChildFollowUpTransferTest extends TestCase
         $this->assertSame('M', $followUp->sex);
         $this->assertSame('مركز الإيواء أ', $followUp->shelter_name);
         $this->assertSame(now()->format('Y-m-d'), $followUp->admission_date->format('Y-m-d'));
-        $this->assertSame($previous->id, $followUp->source_child_visit_id);
+
+        // The referral points back at the Children visit that produced it.
+        $this->assertSame($child->id, $followUp->source_child_visit_id);
 
         $this->assertCount(1, $followUp->visits);
         $firstVisit = $followUp->visits->first();
@@ -137,10 +128,76 @@ class ChildFollowUpTransferTest extends TestCase
         Livewire::test(CreateChild::class)
             ->fillForm($this->childFormData(120))
             ->call('create')
-            ->call('confirmChildReferral');
+            ->assertHasNoFormErrors();
 
         $this->assertSame('MAM', FollowUpChild::first()->admitted_with);
-        $this->assertSame(0, Child::count());
+        $this->assertSame(1, Child::count());
+    }
+
+    public function test_the_muac_input_is_marked_for_the_referral_prompt(): void
+    {
+        $html = $this->get(ChildResource::getUrl('create'))->assertOk()->getContent();
+
+        // The browser finds the reading through this attribute, and raises the
+        // question when the form is submitted - on Create, with the record
+        // complete - rather than when the measurement field is left.
+        $this->assertStringContainsString('data-muac-referral', $html);
+        $this->assertStringContainsString('addEventListener("submit"', $html);
+
+        // It only asks where there is somewhere to record the answer, which is
+        // the create page: the only place a referral is made from.
+        $this->assertTrue(property_exists(CreateChild::class, 'declineFollowUpReferral'));
+        $this->assertFalse(property_exists(EditChild::class, 'declineFollowUpReferral'));
+    }
+
+    public function test_declining_the_prompt_saves_the_screening_without_referring(): void
+    {
+        // What the browser sets when the screener answers "cancel" to the
+        // SAM/MAM prompt: the reading is still a screening and still belongs
+        // in Children, it just does not open a treatment episode.
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->set('declineFollowUpReferral', true)
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $child = Child::firstWhere('child_id', '123456789');
+
+        $this->assertNotNull($child);
+        $this->assertSame('SAM', $child->fi);
+        $this->assertSame(0, FollowUpChild::count());
+    }
+
+    public function test_a_referral_still_happens_when_the_prompt_was_never_answered(): void
+    {
+        // Anything that never sees the dialog - an import, a command, a test -
+        // keeps the automatic referral it always had.
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame(1, FollowUpChild::count());
+    }
+
+    public function test_a_child_already_under_follow_up_is_not_referred_twice(): void
+    {
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(110))
+            ->call('create');
+
+        Livewire::test(CreateChild::class)
+            ->fillForm($this->childFormData(112))
+            ->call('create');
+
+        // Both screenings are recorded; only the first opened an episode.
+        $this->assertSame(2, Child::count());
+        $this->assertSame(1, FollowUpChild::count());
+    }
+
+    public function test_a_follow_up_record_cannot_be_created_by_hand(): void
+    {
+        $this->assertFalse(\App\Filament\Resources\FollowUpChildResource::canCreate());
     }
 
     // -----------------------------------------------------------------

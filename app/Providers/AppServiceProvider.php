@@ -4,12 +4,15 @@ namespace App\Providers;
 
 use App\Models\User;
 use App\Observers\PermissionCacheObserver;
+use App\Settings\GeneralSettings;
 use App\Support\FilamentFormValidation;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Filament\Support\Facades\FilamentTimezone;
+use Filament\Tables\Table;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
@@ -18,6 +21,7 @@ use Livewire\Component;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -44,6 +48,8 @@ class AppServiceProvider extends ServiceProvider
         FilamentAsset::register([
             Css::make('dashboard-custom', resource_path('css/filament/admin/custom.css')),
         ]);
+
+        $this->applyGeneralSettings();
 
         TextInput::configureUsing(function (TextInput $component): void {
             $component
@@ -108,5 +114,43 @@ class AppServiceProvider extends ServiceProvider
             \App\Events\ExcelActionOccurred::class,
             [\App\Listeners\SendSuperAdminNotification::class, 'onExcelAction'],
         );
+    }
+
+    /**
+     * Apply the operator-editable settings that affect the whole application.
+     *
+     * Wrapped because boot() also runs for `migrate` and `db:seed` on a
+     * database that does not carry the settings table yet; a missing setting
+     * must not stop the command that would have created it.
+     */
+    private function applyGeneralSettings(): void
+    {
+        try {
+            // Settings load lazily, so the query fires on the first property
+            // read rather than on resolution - both have to be inside the try.
+            $settings = app(GeneralSettings::class);
+            $timezone = $settings->timezone;
+            $pageOptions = $settings->paginationOptions();
+            $defaultPage = $settings->default_pagination;
+        } catch (Throwable) {
+            return;
+        }
+
+        // Display only. Moving app.timezone off UTC would make Eloquent write
+        // every new created_at/updated_at in local time while every row already
+        // stored is UTC - two timescales in one column, and no way afterwards
+        // to tell which row is which. Storage stays UTC; Filament converts on
+        // the way to the screen and back.
+        if (filled($timezone)) {
+            FilamentTimezone::set($timezone);
+        }
+
+        // One configured page size for every listing in the panel, instead of
+        // each resource carrying its own copy of Filament's default.
+        Table::configureUsing(function (Table $table) use ($pageOptions, $defaultPage): void {
+            $table
+                ->paginationPageOptions($pageOptions)
+                ->defaultPaginationPageOption($defaultPage);
+        });
     }
 }

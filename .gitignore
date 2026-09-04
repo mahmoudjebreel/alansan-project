@@ -27,3 +27,12 @@ yarn-error.log
 
 .vercel
 .env*
+
+# local diagnostics / scratch
+/repro_*.php
+/diagnose_*.php
+
+# Files uploaded through the panel. The directories are kept (and shipped) so
+# the server never has to create them; what people upload is not committed.
+/public/uploads/*
+!/public/uploads/.gitkeep

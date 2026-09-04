@@ -2,6 +2,9 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\Forms\DigitStringField;
+use App\Support\Forms\ReportingDateField;
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\PregnantLactatingWomanResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
@@ -27,16 +30,19 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-heart';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
-        return 'الحوامل والمرضعات';
+        return __('ui.modules.pregnant_lactating_woman');
     }
 
     public static function getPluralModelLabel(): string
     {
-        return 'الحوامل والمرضعات';
+        return __('ui.modules.pregnant_lactating_woman');
     }
 
     public static function form(Schema $form): Schema
@@ -45,25 +51,25 @@ class PregnantLactatingWomanResource extends Resource
             ->schema([
                 \Filament\Schemas\Components\Tabs::make('PLWFormTabs')
                     ->tabs([
-                        \Filament\Schemas\Components\Tabs\Tab::make('الزيارة والموقع')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.visit_and_location'))
                             ->icon('heroicon-o-map-pin')
                             ->schema([
                                 static::getVisitDataSection(),
                                 static::getLocationSection(),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('البيانات الشخصية والزوج')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.personal_and_husband'))
                             ->icon('heroicon-o-user')
                             ->schema([
                                 static::getPersonalDataSection(),
                                 static::getHusbandDataSection(),
 
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('القياسات التغذوية')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.nutrition_measurements'))
                             ->icon('heroicon-o-scale')
                             ->schema([
                                 static::getMeasurementsSection(),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('بيانات الأسرة')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.family_data'))
                             ->icon('heroicon-o-home')
                             ->schema([
                                 static::getFamilyDataSection(),
@@ -75,7 +81,7 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static function getVisitDataSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('بيانات الزيارة')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.visit_data'))
             ->schema([
                 // Derived automatically by the system (first visit, or the
                 // pregnant/lactating switch against the last active visit) and
@@ -93,16 +99,23 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('mother_id')
                     ->label(__('fields.mother_id'))
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهوية مطلوب.',
-                        'numeric' => 'رقم الهوية يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهوية يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.identity_required'),
+                        'regex' => __('ui.validation.identity_digits'),
                     ])
                     ->maxLength(255)
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateMother($get, $set, $livewire)),
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateMother($get, $set, $livewire))
+                    // Only this field and the visit type it derives change, so
+                    // only those two are re-rendered. Re-rendering the whole
+                    // schema sent ~270 KB back on every blur of this field,
+                    // which is what made the duplicate alert feel slow.
+                    ->partiallyRenderAfterStateUpdated()
+                    ->partiallyRenderComponentsAfterStateUpdated(['visit_type']),
                 \Filament\Forms\Components\TextInput::make('full_name_ar')
                     ->label(__('fields.full_name_ar'))
                     ->required()
@@ -111,12 +124,13 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهاتف مطلوب.',
-                        'numeric' => 'رقم الهاتف يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهاتف يجب أن يتكون من 10 أرقام بالضبط.',
+                        'required' => __('ui.validation.phone_required'),
+                        'regex' => __('ui.validation.phone_digits'),
                     ])
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('organization')
@@ -130,11 +144,14 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
                     ->default(now())
-                    ->minDate(now()->startOfDay())
-                    ->rules(['after_or_equal:today'])
+                    // Only while creating: on the edit form this validated the
+                    // date the record was already saved with, so a record more
+                    // than a day old could never be saved again.
+                    ->minDate(fn ($livewire): ?string => ReportingDateField::minDate($livewire))
+                    ->rules(fn ($livewire): array => ReportingDateField::rules($livewire))
                     ->validationMessages([
-                        'required' => 'تاريخ التقرير مطلوب.',
-                        'after_or_equal' => 'لا يمكنك اختيار تاريخ قبل اليوم.',
+                        'required' => __('ui.validation.reporting_date_required'),
+                        'after_or_equal' => __('ui.validation.reporting_date_not_past'),
                     ])
                     ->required(),
                 \Filament\Forms\Components\TextInput::make('screener_profession')
@@ -183,7 +200,9 @@ class PregnantLactatingWomanResource extends Resource
         }
 
         $lastVisitDate = $existing->date_of_reporting ? $existing->date_of_reporting->format('Y-m-d') : ($existing->created_at ? $existing->created_at->format('Y-m-d') : '-');
-        $lastVisitType = $existing->visit_type === 'follow_up' ? 'متابعة' : 'جديد';
+        $lastVisitType = $existing->visit_type === 'follow_up'
+            ? __('ui.visit_type.follow_up')
+            : __('ui.visit_type.new');
         $lastStatusType = match ($existing->status_type) {
             'pregnant' => __('fields.pregnant'),
             'lactating' => __('fields.lactating'),
@@ -222,12 +241,12 @@ class PregnantLactatingWomanResource extends Resource
         ];
 
         $livewire->dispatch('show-duplicate-visit-alert', [
-            'title' => 'هذه السيدة موجودة مسبقاً في النظام',
+            'title' => __('ui.duplicate.woman_title'),
             'last_visit_date' => $lastVisitDate,
             'last_visit_type' => $lastVisitType,
             'last_status_type' => $lastStatusType,
             'visit_type_warning' => null,
-            'confirm_button_text' => 'جلب البيانات وتحويل الزيارة',
+            'confirm_button_text' => __('ui.duplicate.woman_confirm'),
             'action_type' => 'fill_mother',
             'index_url' => static::getUrl('index'),
             'record_data' => $recordData,
@@ -236,7 +255,7 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static function getPersonalDataSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('البيانات الشخصية')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.personal_data'))
             ->schema([
                 \Filament\Forms\Components\DatePicker::make('date_of_birth')
                     ->label(__('fields.date_of_birth'))
@@ -256,10 +275,7 @@ class PregnantLactatingWomanResource extends Resource
                 // the locked visit type.
                 \Filament\Forms\Components\Select::make('status_type')
                     ->label(__('fields.status_type'))
-                    ->options([
-                        'pregnant' => __('fields.pregnant'),
-                        'lactating' => __('fields.lactating'),
-                    ])
+                    ->options(static::statusTypeOptions())
                     ->required()
                     ->live()
                     ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::syncVisitType($get, $set, $livewire)),
@@ -277,8 +293,10 @@ class PregnantLactatingWomanResource extends Resource
                     ->visible(fn (Get $get): bool => $get('is_pwd') === true)
                     ->maxLength(255),
                 \Filament\Forms\Components\DatePicker::make('newborn_dob')
-                    ->label('تاريخ آخر مولود')
-                    ->visible(fn (Get $get): bool => in_array($get('status_type'), ['pregnant', 'lactating'])),
+                    ->label(__('fields.last_newborn_dob'))
+                    // Shown for every status this module records: a mother
+                    // who is both pregnant and breastfeeding has a newborn too.
+                    ->visible(fn (Get $get): bool => array_key_exists((string) $get('status_type'), static::statusTypeOptions())),
 
             ])->columns(2);
 
@@ -286,7 +304,7 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static function getMeasurementsSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('القياسات')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.measurements'))
             ->schema([
                 \Filament\Forms\Components\TextInput::make('weight_kg')
                     ->label(__('fields.weight_kg'))
@@ -300,10 +318,10 @@ class PregnantLactatingWomanResource extends Resource
                     ->required()
                     ->rules(['integer', 'min:1', 'max:250'])
                     ->validationMessages([
-                        'required' => 'منتصف العضد مطلوب.',
-                        'integer' => 'منتصف العضد يجب أن يكون رقماً صحيحاً.',
-                        'min' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
-                        'max' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
+                        'required' => __('ui.validation.muac_required'),
+                        'integer' => __('ui.validation.muac_integer'),
+                        'min' => __('ui.validation.muac_range'),
+                        'max' => __('ui.validation.muac_range'),
                     ])
                     ->live()
                     ->afterStateUpdated(fn (Set $set, $state) => $set('fi', PregnantLactatingWoman::classifyMuac($state))),
@@ -322,7 +340,7 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static function getLocationSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('الموقع')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.location'))
             ->schema([
                 \Filament\Forms\Components\TextInput::make('governorate')
                     ->label(__('fields.governorate'))
@@ -357,7 +375,7 @@ class PregnantLactatingWomanResource extends Resource
 
     // protected static function getAdditionalDataSection(): \Filament\Schemas\Components\Component
     // {
-    //     return \Filament\Schemas\Components\Section::make('بيانات إضافية')
+    //     return \Filament\Schemas\Components\Section::make(__('ui.sections.extra_data'))
     //         ->schema([
     //             \Filament\Forms\Components\TextInput::make('disability_type')
     //                 ->label(__('fields.disability_type'))
@@ -365,7 +383,7 @@ class PregnantLactatingWomanResource extends Resource
     //                 ->visible(fn (Get $get): bool => $get('is_pwd') === true)
     //                 ->maxLength(255),
     //             \Filament\Forms\Components\DatePicker::make('newborn_dob')
-    //                 ->label('تاريخ آخر مولود')
+    //                 ->label(__('fields.last_newborn_dob'))
     //                 ->visible(fn (Get $get): bool => in_array($get('status_type'), ['pregnant', 'lactating'])),
     //             \Filament\Forms\Components\Select::make('status')
     //                 ->label(__('fields.status'))
@@ -387,14 +405,41 @@ class PregnantLactatingWomanResource extends Resource
     /**
      * @return array<string, string>
      */
+    /**
+     * The three statuses this module records.
+     *
+     * The combined status was added to the database enum and to the import
+     * synonym map, but never to this Select - and the Select is what both the
+     * manual form and the importer validate against, so a file carrying
+     * "حامل + مرضع" was refused by a system whose own column accepted it.
+     *
+     * @return array<string, string>
+     */
+    public static function statusTypeOptions(): array
+    {
+        return [
+            'pregnant' => __('fields.pregnant'),
+            'lactating' => __('fields.lactating'),
+            'pregnant_lactating' => __('fields.pregnant_lactating'),
+        ];
+    }
+
     public static function maritalStatusOptions(): array
     {
         return [
             self::MARRIED_STATUS => self::MARRIED_STATUS,
-            'أرملة' => 'أرملة',
-            'مطلقة' => 'مطلقة',
-            'منفصلة' => 'منفصلة',
-            'الزوج مفقود' => 'الزوج مفقود',
+            // The keys are what the column stores; only the labels
+            // follow the panel's language.
+            'أرملة' => __('ui.marital.widowed'),
+            'مطلقة' => __('ui.marital.divorced'),
+            'منفصلة' => __('ui.marital.separated'),
+            'الزوج مفقود' => __('ui.marital.husband_missing'),
+            // Two statuses the field workbooks already record. They were in the
+            // import synonym map but not on the Select, and the Select is what
+            // both the manual form and the importer validate against - so a
+            // file carrying either one was refused.
+            'مهجورة' => __('ui.marital.abandoned'),
+            'معلقة' => __('ui.marital.suspended'),
         ];
     }
 
@@ -409,7 +454,7 @@ class PregnantLactatingWomanResource extends Resource
 
     protected static function getHusbandDataSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('بيانات الزوج')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.husband_data'))
             ->schema([
                 \Filament\Forms\Components\TextInput::make('husband_full_name')
                     ->label(__('fields.husband_full_name'))
@@ -418,31 +463,33 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('husband_id_number')
                     ->label(__('fields.husband_id_number'))
                     ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم هوية الزوج مطلوب.',
-                        'numeric' => 'رقم هوية الزوج يجب أن يكون رقماً.',
-                        'regex' => 'رقم هوية الزوج يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.husband_identity_required'),
+                        'regex' => __('ui.validation.husband_identity_digits'),
                     ])
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('husband_phone')
                     ->label(__('fields.husband_phone'))
                     ->tel()
                     ->required(fn (Get $get): bool => static::husbandDataIsRequired($get('status')))
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
-                        'required' => 'رقم هاتف الزوج مطلوب.',
-                        'numeric' => 'رقم هاتف الزوج يجب أن يكون رقماً.',
-                        'regex' => 'رقم هاتف الزوج يجب أن يتكون من 10 أرقام بالضبط.',
+                        'required' => __('ui.validation.husband_phone_required'),
+                        'regex' => __('ui.validation.husband_phone_digits'),
                     ])
             ])->columns(2);
     }
 
     protected static function getFamilyDataSection(): \Filament\Schemas\Components\Component
     {
-        return \Filament\Schemas\Components\Section::make('بيانات الأسرة')
+        return \Filament\Schemas\Components\Section::make(__('ui.sections.family_data'))
             ->schema([
                 \Filament\Forms\Components\TextInput::make('family_size')
                     ->label(__('fields.family_size'))
@@ -469,7 +516,7 @@ class PregnantLactatingWomanResource extends Resource
                         FilamentInfolist::date('date_of_reporting'),
                         FilamentInfolist::text('screener_profession'),
                     ])->columns(2),
-                \Filament\Schemas\Components\Section::make('البيانات الشخصية')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.personal_data'))
                     ->schema([
                         FilamentInfolist::date('date_of_birth'),
                         FilamentInfolist::text('age_years'),
@@ -478,7 +525,7 @@ class PregnantLactatingWomanResource extends Resource
                         FilamentInfolist::boolean('is_displaced'),
                     ])->columns(2),
 
-                \Filament\Schemas\Components\Section::make('القياسات')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.measurements'))
                     ->schema([
                         FilamentInfolist::text('weight_kg'),
                         FilamentInfolist::text('height_cm'),
@@ -486,7 +533,7 @@ class PregnantLactatingWomanResource extends Resource
                         FilamentInfolist::text('fi'),
                         FilamentInfolist::boolean('has_oedema'),
                     ])->columns(2),
-                \Filament\Schemas\Components\Section::make('الموقع')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.location'))
                     ->schema([
                         FilamentInfolist::text('governorate'),
                         FilamentInfolist::text('municipality'),
@@ -494,19 +541,19 @@ class PregnantLactatingWomanResource extends Resource
                         FilamentInfolist::text('location'),
                         FilamentInfolist::text('type_of_site'),
                     ])->columns(2),
-                \Filament\Schemas\Components\Section::make('بيانات إضافية')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.extra_data'))
                     ->schema([
                         FilamentInfolist::text('disability_type'),
                         FilamentInfolist::date('newborn_dob'),
                         FilamentInfolist::text('status'),
                     ])->columns(2),
-                \Filament\Schemas\Components\Section::make('بيانات الزوج')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.husband_data'))
                     ->schema([
                         FilamentInfolist::text('husband_id_number'),
                         FilamentInfolist::text('husband_full_name'),
                         FilamentInfolist::text('husband_phone'),
                     ])->columns(2),
-                \Filament\Schemas\Components\Section::make('بيانات الأسرة')
+                \Filament\Schemas\Components\Section::make(__('ui.sections.family_data'))
                     ->schema([
                         FilamentInfolist::text('family_size'),
                         FilamentInfolist::text('children_count'),
@@ -544,11 +591,11 @@ class PregnantLactatingWomanResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('mother_id')
                     ->label(__('fields.mother_id'))
-                    ->searchable()
+                    ->searchable(query: RecordSearch::identifier('mother_id'))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('full_name_ar')
                     ->label(__('fields.full_name_ar'))
-                    ->searchable()
+                    ->searchable(query: RecordSearch::name('full_name_ar'))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status_type')
                     ->label(__('fields.status_type'))
@@ -558,11 +605,9 @@ class PregnantLactatingWomanResource extends Resource
                         'lactating' => 'success',
                         default => 'gray',
                     })
-                    ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('governorate')
                     ->label(__('fields.governorate'))
-                    ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
@@ -594,17 +639,14 @@ class PregnantLactatingWomanResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('organization')
                     ->label(__('fields.organization'))
-                    ->searchable()
+                    ->searchable(query: RecordSearch::identifier('organization'))
                     ->sortable(),
             ])
             ->defaultSort('date_of_reporting', 'desc')
             ->filters([
                 Tables\Filters\SelectFilter::make('status_type')
                     ->label(__('fields.status_type'))
-                    ->options([
-                        'pregnant' => __('fields.pregnant'),
-                        'lactating' => __('fields.lactating'),
-                    ]),
+                    ->options(static::statusTypeOptions()),
                 Tables\Filters\SelectFilter::make('governorate')
                     ->label(__('fields.governorate')),
                 Tables\Filters\SelectFilter::make('type_of_site')
@@ -653,11 +695,11 @@ class PregnantLactatingWomanResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
-                    \Filament\Actions\RestoreBulkAction::make()
+                    \App\Filament\Actions\FastRestoreBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
-                    \Filament\Actions\ForceDeleteBulkAction::make()
+                    \App\Filament\Actions\FastForceDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

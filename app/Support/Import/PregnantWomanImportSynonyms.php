@@ -255,6 +255,37 @@ final class PregnantWomanImportSynonyms
     private const BOOLEAN_FIELDS = ['is_pwd', 'is_displaced', 'has_oedema', 'is_family_pwd'];
 
     /**
+     * These maps in the shape ImportDefinition carries them: one flat
+     * "alias => stored value" table per field.
+     *
+     * The maps were written here but never handed to the import definition, so
+     * the reader went on rejecting every Arabic spelling of every Select
+     * column. ImportSchema already knows how to apply a definition's synonyms -
+     * checking them only after the real options, so an alias can never shadow
+     * an option - which is why the maps are passed to it rather than a second
+     * matching path being run alongside it.
+     *
+     * @return array<string, array<string, string>>
+     *
+     * @see \App\Imports\ImportDefinition::all()
+     * @see \App\Support\ImportSchema::castOption()
+     */
+    public static function forImportDefinition(): array
+    {
+        $map = [];
+
+        foreach (self::FIELDS as $field => $spec) {
+            $map[$field] = $spec['values'];
+        }
+
+        foreach (self::BOOLEAN_FIELDS as $field) {
+            $map[$field] = self::BOOLEAN_VALUES;
+        }
+
+        return $map;
+    }
+
+    /**
      * Whether this column has a synonym map at all. Free-text columns (names,
      * phone numbers, measurements, dates) have none and are left alone.
      */

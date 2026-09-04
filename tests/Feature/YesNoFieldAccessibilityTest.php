@@ -3,13 +3,11 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\ChildResource\Pages\CreateChild;
-use App\Filament\Resources\FollowUpChildResource\Pages\CreateFollowUpChild;
 use App\Filament\Resources\GroupSessionResource\Pages\CreateGroupSession;
 use App\Filament\Resources\IndividualCounselingResource\Pages\CreateIndividualCounseling;
 use App\Filament\Resources\MotherToMotherResource\Pages\CreateMotherToMotherSession;
 use App\Filament\Resources\PregnantLactatingWomanResource\Pages\CreatePregnantLactatingWoman;
 use App\Models\Child;
-use App\Models\FollowUpChild;
 use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\MotherToMotherSession;
@@ -33,14 +31,21 @@ class YesNoFieldAccessibilityTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** @var array<class-string, class-string> */
+    /**
+     * Follow Up Children is absent on purpose: its records are opened by the
+     * Children module when a screening comes back MAM or SAM, so it has no
+     * create page.
+     *
+     * @see \App\Support\ChildFollowUpTransfer::refer()
+     *
+     * @var array<class-string, class-string>
+     */
     private const MODULES = [
         CreateChild::class => Child::class,
         CreatePregnantLactatingWoman::class => PregnantLactatingWoman::class,
         CreateGroupSession::class => GroupSession::class,
         CreateMotherToMotherSession::class => MotherToMotherSession::class,
         CreateIndividualCounseling::class => IndividualCounseling::class,
-        CreateFollowUpChild::class => FollowUpChild::class,
     ];
 
     protected function setUp(): void

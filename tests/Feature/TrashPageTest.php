@@ -102,10 +102,18 @@ class TrashPageTest extends TestCase
         // Icons render as real, class-sized SVGs (not oversized raw components).
         $this->assertStringContainsString('<svg', $html);
 
-        // Destructive actions use the centralized SweetAlert2 helper, not native confirm().
-        $this->assertStringContainsString("confirmAction(\$wire, 'restore'", $html);
-        $this->assertStringContainsString("confirmAction(\$wire, 'forceDelete'", $html);
+        // Destructive actions use the centralized SweetAlert2 helper, not native
+        // confirm(). The expression is an HTML attribute, so its quotes arrive
+        // escaped - decode before matching, the way the browser does.
+        $decoded = html_entity_decode($html, ENT_QUOTES);
+        $this->assertStringContainsString('confirmAction($wire, "restore"', $decoded);
+        $this->assertStringContainsString('confirmAction($wire, "forceDelete"', $decoded);
         $this->assertStringNotContainsString('wire:confirm', $html);
+
+        // Blade does not compile directives inside a component's attributes:
+        // an `@js(...)` written there is shipped verbatim and every handler on
+        // the page becomes a syntax error, which is how the buttons went dead.
+        $this->assertStringNotContainsString('@js(', $html);
 
         // The table content is present and readable.
         $this->assertStringContainsString('Render Me', $html);
@@ -120,6 +128,7 @@ class TrashPageTest extends TestCase
 
         $this->assertStringContainsString('<svg', $html);
         $this->assertStringNotContainsString('wire:confirm', $html);
+        $this->assertStringNotContainsString('@js(', $html);
     }
 
     public function test_restore_is_blocked_for_users_without_permission(): void

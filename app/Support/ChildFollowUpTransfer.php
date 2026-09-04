@@ -12,55 +12,73 @@ use Illuminate\Support\Facades\DB;
  * The two automatic transfers between the Children module and the Follow Up
  * Child module.
  *
- * Both directions are only ever reached from a manual Create/Edit form, after
- * the user has confirmed the move. Nothing here is wired into the bulk Excel
- * import, which has no way to ask a person anything and therefore keeps
- * writing rows exactly as it always did.
+ * Admission (Children -> Follow Up Child)
+ *   Every screening is recorded in Children, whatever the reading says. A
+ *   reading of MAM or SAM additionally opens a follow-up episode for the same
+ *   child; a Normal reading is simply the Children visit and nothing else.
+ *   The Children row is the screening record and the follow-up record is the
+ *   treatment episode - they answer different questions, so the screening is
+ *   never withheld from Children just because it also started an episode.
+ *
+ * Discharge (Follow Up Child -> Children)
+ *   A followed-up child whose latest visit comes back Normal is cured, and
+ *   returns to Children as a new visit carrying that final measurement.
+ *
+ * Neither direction is wired into the bulk Excel import, which has no way to
+ * ask a person anything and keeps writing rows exactly as it always did.
  */
 final class ChildFollowUpTransfer
 {
     /**
-     * Admission: a child screened at MAM or SAM is enrolled into follow-up
-     * instead of being recorded as an ordinary Children visit.
+     * Open a follow-up episode for a child who has just been screened at MAM
+     * or SAM, unless one is already open for them.
      *
-     * The reading that triggered the referral becomes visit 1 of the new
-     * record, and no row is written to the Children table at all - counting
-     * the same screening in both modules would double it in every report.
+     * The screening that triggered the referral becomes visit 1 of the episode,
+     * and the Children row it came from is linked so the two can be read
+     * together afterwards.
      *
-     * @param  array<string, mixed>  $childData  Validated Children form data.
+     * Returns null when nothing was opened: a Normal reading, a blank
+     * measurement, or a child who is already being followed up.
      */
-    public static function admit(array $childData, string $fi): FollowUpChild
+    public static function refer(Child $child): ?FollowUpChild
     {
-        $childId = $childData['child_id'] ?? null;
-        $readingDate = static::date($childData['date_of_reporting'] ?? null) ?? Carbon::today();
-        $dob = static::date($childData['date_of_birth'] ?? null);
+        $fi = MuacClassifier::classify($child->muac_mm);
 
-        return DB::transaction(function () use ($childData, $childId, $fi, $readingDate, $dob): FollowUpChild {
+        if (! MuacClassifier::isMalnourished($fi)) {
+            return null;
+        }
+
+        if (static::hasOpenEpisode($child->child_id)) {
+            return null;
+        }
+
+        $readingDate = static::date($child->date_of_reporting) ?? Carbon::today();
+        $dob = static::date($child->date_of_birth);
+
+        return DB::transaction(function () use ($child, $fi, $readingDate, $dob): FollowUpChild {
             $followUpChild = FollowUpChild::create([
-                'id_number' => $childId,
-                'child_name' => $childData['name'] ?? null,
-                'sex' => static::toFollowUpSex($childData['sex'] ?? null),
+                'id_number' => $child->child_id,
+                'child_name' => $child->name,
+                'sex' => static::toFollowUpSex($child->sex),
                 'dob' => $dob,
                 'age' => FollowUpChild::formatCurrentAge($dob),
-                'mobile_number' => $childData['phone_number'] ?? null,
-                'shelter_name' => static::shelterNameFrom($childData),
-                'governorate' => $childData['governorate'] ?? 'gaza',
+                'mobile_number' => $child->phone_number,
+                'shelter_name' => static::shelterNameFrom($child),
+                'governorate' => $child->governorate ?: 'gaza',
                 // Fixed by the rule that produced this admission.
                 'causes_of_admission' => 'malnutrition',
                 'admitted_with' => $fi,
                 'admission_date' => Carbon::today(),
                 'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
                 'discharge_date' => null,
-                // No Children row is written for this reading, so the link
-                // points at the child's previous visit when there is one.
-                'source_child_visit_id' => ChildDuplicateChecker::latestActiveVisit($childId)?->getKey(),
+                'source_child_visit_id' => $child->getKey(),
             ]);
 
             $followUpChild->visits()->create([
                 'visit_number' => 1,
                 'visit_date' => $readingDate,
                 // FI is derived from this MUAC by the visit model itself.
-                'muac' => $childData['muac_mm'] ?? null,
+                'muac' => $child->muac_mm,
             ]);
 
             return $followUpChild;
@@ -68,11 +86,31 @@ final class ChildFollowUpTransfer
     }
 
     /**
+     * Whether the child already has a follow-up episode that has not been
+     * closed. Referring the same child twice would count one episode as two in
+     * every report the module feeds.
+     */
+    public static function hasOpenEpisode(mixed $childId): bool
+    {
+        if (blank($childId)) {
+            return false;
+        }
+
+        return FollowUpChild::query()
+            ->where('id_number', $childId)
+            ->where(function ($query): void {
+                $query->whereNull('discharge_outcome')
+                    ->orWhereNotIn('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES);
+            })
+            ->exists();
+    }
+
+    /**
      * Discharge: a followed-up child whose latest visit came back Normal is
      * cured, and returns to the Children module as a new visit.
      *
      * Only ever called for the "Cured" outcome; the other four outcomes are
-     * human decisions that lock the record without producing anything here.
+     * human decisions that close the record without producing anything here.
      */
     public static function discharge(FollowUpChild $followUpChild, FollowUpChildVisit $latestVisit): Child
     {
@@ -138,14 +176,12 @@ final class ChildFollowUpTransfer
      * The best shelter/site name the Children form actually collects. The
      * follow-up module asks for one field; Children spreads the same idea over
      * several optional ones, so the most specific filled value wins.
-     *
-     * @param  array<string, mixed>  $childData
      */
-    private static function shelterNameFrom(array $childData): ?string
+    private static function shelterNameFrom(Child $child): ?string
     {
         foreach (['location', 'neighbourhood', 'type_of_site', 'municipality'] as $field) {
-            if (filled($childData[$field] ?? null)) {
-                return $childData[$field];
+            if (filled($child->{$field})) {
+                return $child->{$field};
             }
         }
 

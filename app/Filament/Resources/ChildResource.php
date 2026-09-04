@@ -2,6 +2,9 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\Forms\DigitStringField;
+use App\Support\Forms\ReportingDateField;
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\ChildResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
@@ -27,7 +30,10 @@ class ChildResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-users';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
@@ -45,26 +51,26 @@ class ChildResource extends Resource
             ->schema([
                 \Filament\Schemas\Components\Tabs::make('ChildFormTabs')
                     ->tabs([
-                        \Filament\Schemas\Components\Tabs\Tab::make('الزيارة والموقع')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.visit_and_location'))
                             ->icon('heroicon-o-map-pin')
                             ->schema([
                                 static::getVisitDataSection(),
                                 static::getLocationSection(),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('بيانات الطفل والوالدين')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.child_and_parents'))
                             ->icon('heroicon-o-user')
                             ->schema([
                                 static::getChildDataSection(),
                                 static::getMotherDataSection(),
                                 static::getFatherDataSection(),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('القياسات والتغذية')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.measurements_and_nutrition'))
                             ->icon('heroicon-o-scale')
                             ->schema([
                                 static::getMeasurementsSection(),
                                 static::getNutritionProgramSection(),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('الأسرة والحالات الخاصة')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.family_and_special_cases'))
                             ->icon('heroicon-o-home')
                             ->schema([
                                 static::getFamilyDataSection(),
@@ -95,16 +101,23 @@ class ChildResource extends Resource
                 \Filament\Forms\Components\TextInput::make('child_id')
                     ->label(__('fields.child_id'))
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم هوية الطفل مطلوب.',
-                        'numeric' => 'رقم هوية الطفل يجب أن يكون رقماً.',
-                        'regex' => 'رقم هوية الطفل يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.child_identity_required'),
+                        'regex' => __('ui.validation.child_identity_digits'),
                     ])
                     ->maxLength(255)
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateChild($get, $set, $livewire)),
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateChild($get, $set, $livewire))
+                    // Only this field and the visit type it derives change, so
+                    // only those two are re-rendered. Re-rendering the whole
+                    // schema sent ~270 KB back on every blur of this field,
+                    // which is what made the duplicate alert feel slow.
+                    ->partiallyRenderAfterStateUpdated()
+                    ->partiallyRenderComponentsAfterStateUpdated(['visit_type']),
                 \Filament\Forms\Components\TextInput::make('name')
                     ->label(__('fields.name'))
                     ->required()
@@ -113,12 +126,13 @@ class ChildResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهاتف مطلوب.',
-                        'numeric' => 'رقم الهاتف يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهاتف يجب أن يتكون من 10 أرقام بالضبط.',
+                        'required' => __('ui.validation.phone_required'),
+                        'regex' => __('ui.validation.phone_digits'),
                     ])
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('organization')
@@ -132,11 +146,14 @@ class ChildResource extends Resource
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
                     ->default(now())
-                    ->minDate(now()->startOfDay())
-                    ->rules(['after_or_equal:today'])
+                    // Only while creating: on the edit form this validated the
+                    // date the record was already saved with, so a record more
+                    // than a day old could never be saved again.
+                    ->minDate(fn ($livewire): ?string => ReportingDateField::minDate($livewire))
+                    ->rules(fn ($livewire): array => ReportingDateField::rules($livewire))
                     ->validationMessages([
-                        'required' => 'تاريخ التقرير مطلوب.',
-                        'after_or_equal' => 'لا يمكنك اختيار تاريخ قبل اليوم.',
+                        'required' => __('ui.validation.reporting_date_required'),
+                        'after_or_equal' => __('ui.validation.reporting_date_not_past'),
                     ])
                     ->required(),
                 \Filament\Forms\Components\TextInput::make('screener_profession')
@@ -176,7 +193,11 @@ class ChildResource extends Resource
         // duplicate alert and the visit type.
         $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
 
-        static::syncVisitType($get, $set, $livewire);
+        // Settled from the row already in hand rather than by looking the same
+        // child up a second time.
+        if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            $set('visit_type', ChildDuplicateChecker::resolveVisitTypeFrom($existing, $get('muac_mm')));
+        }
 
         // Rule 2: a first visit is simply "new" - no alert, nothing to confirm.
         if (! $existing) {
@@ -184,7 +205,9 @@ class ChildResource extends Resource
         }
 
         $lastVisitDate = $existing->date_of_reporting ? $existing->date_of_reporting->format('Y-m-d') : ($existing->created_at ? $existing->created_at->format('Y-m-d') : '-');
-        $lastVisitType = $existing->visit_type === 'follow_up' ? 'متابعة' : 'جديد';
+        $lastVisitType = $existing->visit_type === 'follow_up'
+            ? __('ui.visit_type.follow_up')
+            : __('ui.visit_type.new');
 
         $recordData = [
             'child_id' => $existing->child_id,
@@ -240,11 +263,11 @@ class ChildResource extends Resource
         ];
 
         $livewire->dispatch('show-duplicate-visit-alert', [
-            'title' => 'هذا الطفل موجود مسبقاً في النظام',
+            'title' => __('ui.duplicate.child_title'),
             'last_visit_date' => $lastVisitDate,
             'last_visit_type' => $lastVisitType,
             'visit_type_warning' => null,
-            'confirm_button_text' => 'جلب البيانات وتحويل نوع الزيارة',
+            'confirm_button_text' => __('ui.duplicate.child_confirm'),
             'action_type' => 'fill_child',
             'index_url' => static::getUrl('index'),
             'record_data' => $recordData,
@@ -290,17 +313,49 @@ class ChildResource extends Resource
                     ->required()
                     ->rules(['integer', 'min:1', 'max:200'])
                     ->validationMessages([
-                        'required' => 'منتصف العضد مطلوب.',
-                        'integer' => 'منتصف العضد يجب أن يكون رقماً صحيحاً.',
-                        'min' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
-                        'max' => 'منتصف العضد يجب أن يكون بين 1 و 200.',
+                        'required' => __('ui.validation.muac_required'),
+                        'integer' => __('ui.validation.muac_integer'),
+                        'min' => __('ui.validation.muac_range'),
+                        'max' => __('ui.validation.muac_range'),
                     ])
-                    ->live()
+                    // On blur, not on every keystroke. A live update on this
+                    // field asked the server to re-render a sixty-eight field
+                    // form each time a digit was typed, which is most of what
+                    // made entering a measurement feel slow; a MUAC is only
+                    // meaningful once it is finished being typed anyway.
+                    ->live(onBlur: true)
                     ->afterStateUpdated(function (Get $get, Set $set, $livewire, $state): void {
                         // FI stays derived from this visit's MUAC alone, and the
                         // relapse check then re-derives the visit type from it.
                         $set('fi', Child::classifyMuac($state));
                         static::syncVisitType($get, $set, $livewire);
+                    })
+                    // Only the two fields this derives come back, not the whole
+                    // schema - the same treatment the child ID field already had.
+                    ->partiallyRenderAfterStateUpdated()
+                    ->partiallyRenderComponentsAfterStateUpdated(['fi', 'visit_type'])
+                    // Marks the input for the browser-side SAM/MAM referral
+                    // prompt - see dashboard-alerts.blade.php.
+                    //
+                    // The edit form additionally carries the reading already
+                    // on file. That is what lets the prompt fire only when the
+                    // measurement has actually been changed: without it,
+                    // re-saving a child who is already SAM - or correcting
+                    // their phone number - would raise the same dialog every
+                    // time and teach people to click straight through it.
+                    ->extraInputAttributes(function ($livewire, $record): array {
+                        $attributes = ['data-muac-referral' => 'true'];
+
+                        if ($livewire instanceof \Filament\Resources\Pages\EditRecord && $record instanceof Child) {
+                            // Cast through float so the decimal column's
+                            // "130.0" is written as "130" - the browser
+                            // compares it against what is typed in the box.
+                            $attributes['data-muac-original'] = blank($record->muac_mm)
+                                ? ''
+                                : (string) (float) $record->muac_mm;
+                        }
+
+                        return $attributes;
                     }),
                 \Filament\Forms\Components\TextInput::make('weight_kg')
                     ->label(__('fields.weight_kg'))
@@ -395,10 +450,12 @@ class ChildResource extends Resource
                     ->label(__('fields.mother_marital_status'))
                     ->required()
                     ->options([
-                        'متزوجة' => 'متزوجة',
-                        'مطلقة' => 'مطلقة',
-                        'أرملة' => 'أرملة',
-                        'منفصلة' => 'منفصلة',
+                        // The keys are what the column stores; only the
+                        // labels follow the panel's language.
+                        'متزوجة' => __('ui.marital.married'),
+                        'مطلقة' => __('ui.marital.divorced'),
+                        'أرملة' => __('ui.marital.widowed'),
+                        'منفصلة' => __('ui.marital.separated'),
                     ]),
                 \Filament\Forms\Components\TextInput::make('mother_muac_mm')
                     ->label(__('fields.mother_muac_mm'))
@@ -509,7 +566,7 @@ class ChildResource extends Resource
             ->schema([
                 \Filament\Schemas\Components\Tabs::make('ChildInfolistTabs')
                     ->tabs([
-                        \Filament\Schemas\Components\Tabs\Tab::make('الزيارة والموقع')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.visit_and_location'))
                             ->icon('heroicon-o-map-pin')
                             ->schema([
                                 \Filament\Schemas\Components\Section::make(__('fields.visit_data'))
@@ -532,7 +589,7 @@ class ChildResource extends Resource
                                         FilamentInfolist::enum('type_of_site'),
                                     ])->columns(2),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('بيانات الطفل والوالدين')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.child_and_parents'))
                             ->icon('heroicon-o-user')
                             ->schema([
                                 \Filament\Schemas\Components\Section::make(__('fields.child_data'))
@@ -561,7 +618,7 @@ class ChildResource extends Resource
                                         FilamentInfolist::text('father_phone'),
                                     ])->columns(2),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('القياسات والتغذية')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.measurements_and_nutrition'))
                             ->icon('heroicon-o-scale')
                             ->schema([
                                 \Filament\Schemas\Components\Section::make(__('fields.measurements'))
@@ -580,7 +637,7 @@ class ChildResource extends Resource
                                         FilamentInfolist::boolean('is_mother_alive'),
                                     ])->columns(3),
                             ]),
-                        \Filament\Schemas\Components\Tabs\Tab::make('الأسرة والحالات الخاصة')
+                        \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.family_and_special_cases'))
                             ->icon('heroicon-o-home')
                             ->schema([
                                 \Filament\Schemas\Components\Section::make(__('fields.family_data'))
@@ -658,23 +715,22 @@ class ChildResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('child_id')
                     ->label(__('fields.child_id'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::identifier('child_id')),
                 Tables\Columns\TextColumn::make('name')
                     ->label(__('fields.name'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::name('name')),
                 Tables\Columns\TextColumn::make('mother_full_name')
                     ->label(__('fields.mother_full_name'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::name('mother_full_name')),
                 Tables\Columns\TextColumn::make('father_full_name')
                     ->label(__('fields.father_full_name'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::name('father_full_name')),
                 Tables\Columns\TextColumn::make('sex')
                     ->label(__('fields.sex'))
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('governorate')
-                    ->label(__('fields.governorate'))
-                    ->searchable(),
+                    ->label(__('fields.governorate')),
                 Tables\Columns\TextColumn::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
                     ->date()
@@ -729,7 +785,7 @@ class ChildResource extends Resource
                     ->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('organization')
                     ->label(__('fields.organization'))
-                    ->searchable(),
+                    ->searchable(query: RecordSearch::identifier('organization')),
                 Tables\Columns\TextColumn::make('fi')
                     ->label(__('fields.fi'))
                     ->state(fn (Child $record): ?string => Child::classifyMuac($record->muac_mm))
@@ -811,11 +867,11 @@ class ChildResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
-                    \Filament\Actions\RestoreBulkAction::make()
+                    \App\Filament\Actions\FastRestoreBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
-                    \Filament\Actions\ForceDeleteBulkAction::make()
+                    \App\Filament\Actions\FastForceDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

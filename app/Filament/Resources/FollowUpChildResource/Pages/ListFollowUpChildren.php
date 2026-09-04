@@ -34,9 +34,9 @@ class ListFollowUpChildren extends ListRecords
                 ->visible(fn (): bool => auth()->user()?->can('follow_up_children.export') ?? false)
                 ->action(fn () => $this->downloadPdf()),
             $this->importAction(),
-            Actions\CreateAction::make()
-                ->authorize(fn (): bool => auth()->user()?->can('follow_up_children.create') ?? false)
-                ->visible(fn (): bool => auth()->user()?->can('follow_up_children.create') ?? false),
+            // No create action: a follow-up episode is opened by the Children
+            // module when a screening comes back MAM or SAM.
+            // @see \App\Support\ChildFollowUpTransfer::refer()
         ];
     }
 

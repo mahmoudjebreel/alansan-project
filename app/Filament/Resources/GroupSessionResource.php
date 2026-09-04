@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Support\Forms\DigitStringField;
+use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\GroupSessionResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
@@ -27,7 +29,10 @@ class GroupSessionResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-user-group';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة البيانات';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.data');
+    }
 
     public static function getModelLabel(): string
     {
@@ -44,12 +49,12 @@ class GroupSessionResource extends Resource
         return $schema->schema([
             \Filament\Schemas\Components\Tabs::make('GroupSessionTabs')
                 ->tabs([
-                    \Filament\Schemas\Components\Tabs\Tab::make('بيانات لقاء الندوة')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.group_session_data'))
                         ->icon('heroicon-o-calendar')
                         ->schema([
                             static::getGroupSessionDataSection(),
                         ]),
-                    \Filament\Schemas\Components\Tabs\Tab::make('بيانات المشارك/ة')
+                    \Filament\Schemas\Components\Tabs\Tab::make(__('ui.tabs.participant_data'))
                         ->icon('heroicon-o-user-group')
                         ->schema([
                             static::getParticipantDataSection(),
@@ -104,16 +109,23 @@ class GroupSessionResource extends Resource
                 Forms\Components\TextInput::make('id_number')
                     ->label(__('fields.id_number'))
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهوية مطلوب.',
-                        'numeric' => 'رقم الهوية يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهوية يجب أن يتكون من 9 أرقام بالضبط.',
+                        'required' => __('ui.validation.identity_required'),
+                        'regex' => __('ui.validation.identity_digits'),
                     ])
                     ->maxLength(255)
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateParticipant($get, $set, $livewire)),
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::checkDuplicateParticipant($get, $set, $livewire))
+                    // Only this field and the visit type it derives change, so
+                    // only those two are re-rendered. Re-rendering the whole
+                    // schema sent ~270 KB back on every blur of this field,
+                    // which is what made the duplicate alert feel slow.
+                    ->partiallyRenderAfterStateUpdated()
+                    ->partiallyRenderComponentsAfterStateUpdated(['visit_type']),
                 Forms\Components\TextInput::make('full_name_ar')->label(__('fields.full_name_ar'))->required()->maxLength(255),
                 Forms\Components\Select::make('category')
                     ->label(__('fields.category'))
@@ -136,12 +148,13 @@ class GroupSessionResource extends Resource
                     ->label(__('fields.phone_number'))
                     ->tel()
                     ->required()
-                    ->numeric()
+                    // A digit string, not a quantity: type="number" dropped the
+                    // leading zero. @see \App\Support\Forms\DigitStringField
+                    ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{10}$/'])
                     ->validationMessages([
-                        'required' => 'رقم الهاتف مطلوب.',
-                        'numeric' => 'رقم الهاتف يجب أن يكون رقماً.',
-                        'regex' => 'رقم الهاتف يجب أن يتكون من 10 أرقام بالضبط.',
+                        'required' => __('ui.validation.phone_required'),
+                        'regex' => __('ui.validation.phone_digits'),
                     ])
                     ->maxLength(255),
                 BooleanSelectField::make('has_gsfsh', __('fields.has_gsfsh')),
@@ -193,14 +206,14 @@ class GroupSessionResource extends Resource
         }
 
         $livewire->dispatch('show-group-session-duplicate-alert', [
-            'title' => 'رقم الهوية مسجل مسبقاً في لقاءات الندوات',
+            'title' => __('ui.duplicate.group_session_title'),
             'last_session_date' => $existing->session_date?->format('Y-m-d')
                 ?? $existing->created_at?->format('Y-m-d')
                 ?? '-',
             'last_visit_type' => $existing->visit_type === 'follow_up' ? __('fields.follow_up') : __('fields.new'),
             'last_session_subject' => static::sessionSubjectLabel($existing),
-            'confirm_button_text' => 'جلب البيانات',
-            'close_button_text' => 'إغلاق',
+            'confirm_button_text' => __('ui.duplicate.group_session_confirm'),
+            'close_button_text' => __('ui.duplicate.group_session_close'),
             'index_url' => static::getUrl('index'),
             'record_data' => static::participantDataFrom($existing),
         ]);
@@ -297,12 +310,12 @@ class GroupSessionResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('session_date')->label(__('fields.session_date'))->date()->sortable(),
-                Tables\Columns\TextColumn::make('session_group_number')->label(__('fields.session_group_number'))->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('session_group_number')->label(__('fields.session_group_number'))->searchable(query: RecordSearch::identifier('session_group_number'))->sortable(),
                 Tables\Columns\TextColumn::make('session_subject')->label(__('fields.session_subject'))->badge()->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('locality')->label(__('fields.locality'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('shelter_name')->label(__('fields.shelter_name'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
-                Tables\Columns\TextColumn::make('id_number')->label(__('fields.id_number'))->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('full_name_ar')->label(__('fields.full_name_ar'))->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('id_number')->label(__('fields.id_number'))->searchable(query: RecordSearch::identifier('id_number'))->sortable(),
+                Tables\Columns\TextColumn::make('full_name_ar')->label(__('fields.full_name_ar'))->searchable(query: RecordSearch::name('full_name_ar'))->sortable(),
                 Tables\Columns\TextColumn::make('visit_type')->label(__('fields.visit_type'))->badge()->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 Tables\Columns\TextColumn::make('category')->label(__('fields.category'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 YesNoColumn::make('is_pwd')->label(__('fields.is_pwd'))->toggleable(isToggledHiddenByDefault: true),
@@ -332,7 +345,7 @@ class GroupSessionResource extends Resource
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make()
+                    \App\Filament\Actions\FastDeleteBulkAction::make()
                         ->visible(fn (): bool => static::allowsAction('delete')),
                 ]),
             ]);

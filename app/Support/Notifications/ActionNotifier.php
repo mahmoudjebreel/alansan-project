@@ -2,7 +2,6 @@
 
 namespace App\Support\Notifications;
 
-use App\Jobs\DeliverDataActionNotification;
 use App\Models\User;
 use App\Settings\NotificationSettings;
 use Illuminate\Database\Eloquent\Model;
@@ -13,7 +12,9 @@ use Illuminate\Support\Facades\Cache;
  *
  * Everything here runs after the original operation has already committed. It
  * is deliberately cheap: a settings read, a role check and a cache increment.
- * The actual notification is handed to the queue.
+ * The notification itself is written by DataActionDelivery, synchronously:
+ * one row in the `notifications` table costs less than the queue plumbing
+ * that used to carry it, and it never depends on a worker being up.
  */
 final class ActionNotifier
 {
@@ -60,13 +61,40 @@ final class ActionNotifier
             return;
         }
 
-        self::queue(
+        self::deliver(
             module: NotifiableModule::keyFor($record),
             moduleLabel: NotifiableModule::labelFor($record),
             action: $action,
             actor: $actor,
             recordLabel: NotifiableModule::recordLabel($record),
             referenceUrl: NotifiableModule::referenceUrl($record, $action),
+        );
+    }
+
+    /**
+     * One bulk operation over many records of a single module.
+     *
+     * The per-record notifications are suppressed while a bulk delete runs, so
+     * this is the notification that replaces them: it names the module and the
+     * number of rows instead of pretending 5,000 deletes were one record. Like
+     * the Excel summary it is deliberately not gated on self::$suppressed and
+     * never grouped - it already is the group.
+     */
+    public static function bulk(Model | string $module, string $action, ?User $actor, int $recordCount): void
+    {
+        if (! self::shouldNotify($action, $actor)) {
+            return;
+        }
+
+        self::deliver(
+            module: NotifiableModule::keyFor($module),
+            moduleLabel: NotifiableModule::labelFor($module),
+            action: $action,
+            actor: $actor,
+            recordLabel: __('ui.notifications.record_count', ['count' => $recordCount]),
+            referenceUrl: null,
+            recordCount: $recordCount,
+            groupable: false,
         );
     }
 
@@ -82,12 +110,12 @@ final class ActionNotifier
             return;
         }
 
-        self::queue(
+        self::deliver(
             module: $moduleKey,
             moduleLabel: NotifiableModule::labelFor($moduleKey),
             action: $action,
             actor: $actor,
-            recordLabel: $recordCount === null ? null : $recordCount . ' سجل',
+            recordLabel: $recordCount === null ? null : __('ui.notifications.record_count', ['count' => $recordCount]),
             referenceUrl: null,
             recordCount: $recordCount,
             groupable: false,
@@ -122,10 +150,10 @@ final class ActionNotifier
     }
 
     /**
-     * Hand the notification to the queue, debouncing repeats by the same user
-     * on the same module and action.
+     * Write the notification, debouncing repeats by the same user on the same
+     * module and action.
      */
-    private static function queue(
+    private static function deliver(
         string $module,
         string $moduleLabel,
         string $action,
@@ -140,11 +168,10 @@ final class ActionNotifier
             && $window > 0
             && in_array($action, ActionType::groupable(), true);
 
+        $payload = self::describe($module, $moduleLabel, $action, $actor, $recordLabel, $referenceUrl, $recordCount);
+
         if (! $group) {
-            DeliverDataActionNotification::dispatch(
-                self::describe($module, $moduleLabel, $action, $actor, $recordLabel, $referenceUrl, $recordCount),
-                null,
-            );
+            DataActionDelivery::send($payload);
 
             return;
         }
@@ -152,14 +179,16 @@ final class ActionNotifier
         $key = self::groupKey($actor, $module, $action);
         $count = self::increment($key, $window);
 
-        // Only the first action in the window schedules delivery; the ones
-        // after it just raise the counter that delivery will read.
+        // The first action of a window delivers straight away; every later one
+        // folds itself into that same notification, so the recipient sees it
+        // immediately and watches the count climb.
         if ($count === 1) {
-            DeliverDataActionNotification::dispatch(
-                self::describe($module, $moduleLabel, $action, $actor, $recordLabel, $referenceUrl, $recordCount),
-                $key,
-            )->delay(now()->addSeconds($window));
+            DataActionDelivery::send($payload, $key);
+
+            return;
         }
+
+        DataActionDelivery::collapse($key, $count);
     }
 
     /**
@@ -213,7 +242,40 @@ final class ActionNotifier
     }
 
     /**
-     * Ids of the Super Admins configured to receive notifications.
+     * Ids of the Super Admins who should be told about this actor's action.
+     *
+     * A Super Admin who is also the actor is dropped, so the bell does not
+     * report back to someone what they just did themselves - unless they asked
+     * for exactly that with notify_self_actions.
+     *
+     * @return array<int>
+     */
+    public static function recipientsFor(int | string | null $actorId): array
+    {
+        $recipients = self::recipients();
+
+        if ($actorId === null || (self::settings()['notify_self_actions'] ?? false)) {
+            return $recipients;
+        }
+
+        return array_values(array_filter(
+            $recipients,
+            fn ($id): bool => (string) $id !== (string) $actorId,
+        ));
+    }
+
+    /**
+     * Ids of the users configured to receive notifications.
+     *
+     * A named list wins outright and is not filtered by role: picking an Admin
+     * on the settings page is how that Admin starts receiving the panel's
+     * action notifications, which is the whole point of the setting. Leaving
+     * the list empty keeps the original default - every Super Admin - so an
+     * installation that never touches the setting behaves as it always did.
+     *
+     * The ids are read back through the users table rather than returned as
+     * stored, so a recipient who has since been deleted drops out instead of
+     * being handed to Notification::send() as a missing model.
      *
      * @return array<int>
      */
@@ -221,17 +283,18 @@ final class ActionNotifier
     {
         $selected = self::settings()['recipient_user_ids'];
 
-        return User::role('Super Admin')
-            ->when($selected !== [], fn ($query) => $query->whereIn('id', $selected))
-            ->pluck('id')
-            ->all();
+        if ($selected !== []) {
+            return User::whereIn('id', $selected)->pluck('id')->all();
+        }
+
+        return User::role('Super Admin')->pluck('id')->all();
     }
 
     /**
      * Settings, with defaults if the settings row is not there yet — the
      * notification system must never be what breaks a request.
      *
-     * @return array{enabled: bool, enabled_actions: array<string>, recipient_user_ids: array<int>, group_window_seconds: int}
+     * @return array{enabled: bool, notify_self_actions: bool, enabled_actions: array<string>, recipient_user_ids: array<int>, group_window_seconds: int}
      */
     private static function settings(): array
     {

@@ -6,7 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Maps a model onto the module a Super Admin sees in a notification: its
- * Arabic name, how one of its records is identified, and where to look at it.
+ * name, how one of its records is identified, and where to look at it.
+ *
+ * The names come from lang/*\/ui.php under `modules`, which the Trash page
+ * reads too, so one module is never called two different things on two
+ * screens - nor stays Arabic when the panel is switched to English.
  *
  * The six data modules are the ones the notification system is about. User,
  * Role and FollowUpChildVisit are listed too because the audit notifications
@@ -16,53 +20,54 @@ use Illuminate\Database\Eloquent\Model;
 final class NotifiableModule
 {
     /**
-     * class-basename => [label, resource class or null, identifying attributes]
+     * class-basename => [translation key, resource class or null, identifying
+     * attributes]
      *
      * @var array<string, array{label: string, resource: ?string, keys: array<string>}>
      */
     private const MAP = [
         'Child' => [
-            'label' => 'الأطفال',
+            'label' => 'child',
             'resource' => \App\Filament\Resources\ChildResource::class,
             'keys' => ['child_id', 'name'],
         ],
         'PregnantLactatingWoman' => [
-            'label' => 'الحوامل والمرضعات',
+            'label' => 'pregnant_lactating_woman',
             'resource' => \App\Filament\Resources\PregnantLactatingWomanResource::class,
             'keys' => ['mother_id', 'full_name_ar'],
         ],
         'GroupSession' => [
-            'label' => 'الجلسات الجماعية',
+            'label' => 'group_session',
             'resource' => \App\Filament\Resources\GroupSessionResource::class,
             'keys' => ['id_number', 'full_name_ar'],
         ],
         'MotherToMotherSession' => [
-            'label' => 'جلسات أم لأم',
+            'label' => 'mother_to_mother',
             'resource' => \App\Filament\Resources\MotherToMotherResource::class,
             'keys' => ['id_number', 'full_name_ar'],
         ],
         'IndividualCounseling' => [
-            'label' => 'جلسات الإرشاد الفردي',
+            'label' => 'individual_counseling',
             'resource' => \App\Filament\Resources\IndividualCounselingResource::class,
             'keys' => ['mother_id_number', 'child_name'],
         ],
         'FollowUpChild' => [
-            'label' => 'متابعة الأطفال',
+            'label' => 'follow_up_child',
             'resource' => \App\Filament\Resources\FollowUpChildResource::class,
             'keys' => ['id_number', 'child_name'],
         ],
         'FollowUpChildVisit' => [
-            'label' => 'زيارات متابعة الأطفال',
+            'label' => 'follow_up_child_visit',
             'resource' => null,
             'keys' => ['visit_number'],
         ],
         'User' => [
-            'label' => 'المستخدمين',
+            'label' => 'user',
             'resource' => \App\Filament\Resources\UserResource::class,
             'keys' => ['name', 'email'],
         ],
         'Role' => [
-            'label' => 'الأدوار والصلاحيات',
+            'label' => 'role',
             'resource' => \App\Filament\Resources\RoleResource::class,
             'keys' => ['name'],
         ],
@@ -75,14 +80,18 @@ final class NotifiableModule
      */
     public static function options(): array
     {
-        return array_map(fn (array $meta): string => $meta['label'], self::MAP);
+        return array_map(fn (array $meta): string => __('ui.modules.' . $meta['label']), self::MAP);
     }
 
     public static function labelFor(Model | string $model): string
     {
         $key = self::keyFor($model);
 
-        return self::MAP[$key]['label'] ?? $key;
+        // An unmapped model falls back to its class basename, which is at
+        // least identifiable, rather than to a missing translation key.
+        return isset(self::MAP[$key])
+            ? __('ui.modules.' . self::MAP[$key]['label'])
+            : $key;
     }
 
     /**
@@ -95,7 +104,7 @@ final class NotifiableModule
     }
 
     /**
-     * A short identifying label for one record, e.g. "123456789 - أحمد".
+     * A short identifying label for one record, e.g. "123456789 - Ahmad".
      */
     public static function recordLabel(Model $model): ?string
     {

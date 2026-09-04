@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Events\ExcelActionOccurred;
 use App\Filament\Pages\NotificationLogPage;
 use App\Filament\Pages\NotificationSettingsPage;
-use App\Jobs\DeliverDataActionNotification;
 use App\Models\Child;
 use App\Models\GroupSession;
 use App\Models\User;
@@ -194,6 +193,42 @@ class DataActionNotificationTest extends TestCase
         $this->assertSame(1, $second->notifications()->count());
     }
 
+    public function test_a_named_recipient_receives_notifications_whatever_their_role(): void
+    {
+        // The point of the setting: an Admin is not a Super Admin, and only
+        // gets the bell because somebody put them on the recipient list.
+        $admin = User::factory()->create();
+        $admin->assignRole('Admin');
+
+        $settings = app(NotificationSettings::class);
+        $settings->recipient_user_ids = [$admin->id];
+        $settings->save();
+
+        $this->actingAs($this->dataEntry);
+        Child::factory()->create();
+
+        $this->assertSame(1, $admin->notifications()->count());
+        // A named list is the list; the Super Admin is not added back to it.
+        $this->assertSame(0, $this->superAdmin->notifications()->count());
+    }
+
+    public function test_a_recipient_who_no_longer_exists_is_skipped(): void
+    {
+        $removed = User::factory()->create();
+        $removed->assignRole('Admin');
+
+        $settings = app(NotificationSettings::class);
+        $settings->recipient_user_ids = [$removed->id, $this->superAdmin->id];
+        $settings->save();
+
+        $removed->delete();
+
+        $this->actingAs($this->dataEntry);
+        Child::factory()->create();
+
+        $this->assertSame(1, $this->superAdmin->notifications()->count());
+    }
+
     public function test_only_the_selected_super_admins_receive_notifications(): void
     {
         $excluded = User::factory()->create();
@@ -244,10 +279,9 @@ class DataActionNotificationTest extends TestCase
     // Grouping and bulk suppression
     // -----------------------------------------------------------------
 
-    public function test_rapid_actions_are_grouped_into_one_delivery(): void
+    public function test_rapid_actions_are_grouped_into_one_notification(): void
     {
         $this->setWindow(60);
-        Queue::fake();
 
         $this->actingAs($this->dataEntry);
 
@@ -255,32 +289,9 @@ class DataActionNotificationTest extends TestCase
             Child::factory()->create(['child_id' => '10000000' . $i]);
         }
 
-        // Five creates, one scheduled delivery.
-        Queue::assertPushed(DeliverDataActionNotification::class, 1);
-    }
-
-    public function test_a_grouped_delivery_reports_the_collected_count(): void
-    {
-        $this->setWindow(60);
-
-        // Only the delivery job is faked: under the sync driver a delayed job
-        // runs at once, which would close the window before the next action
-        // could join it. The notification itself still sends for real.
-        Queue::fake([DeliverDataActionNotification::class]);
-
-        $this->actingAs($this->dataEntry);
-
-        foreach (range(1, 5) as $i) {
-            Child::factory()->create(['child_id' => '20000000' . $i]);
-        }
-
-        $jobs = collect(Queue::pushedJobs()[DeliverDataActionNotification::class] ?? []);
-        $this->assertCount(1, $jobs, 'Five creates should schedule one delivery.');
-
-        $jobs->first()['job']->handle();
-
         $payloads = $this->payloads();
 
+        // Five creates, one notification carrying the count.
         $this->assertCount(1, $payloads);
         $this->assertSame(5, $payloads[0]['record_count']);
         $this->assertStringContainsString('5', $payloads[0]['body']);
@@ -288,10 +299,38 @@ class DataActionNotificationTest extends TestCase
         $this->assertNull($payloads[0]['reference_url']);
     }
 
+    /**
+     * The point of collapsing rather than delaying: the first action of a
+     * window is visible at once, and the ones after it update that same
+     * notification instead of the recipient waiting out the window for
+     * anything to appear at all.
+     */
+    public function test_the_first_action_of_a_window_is_visible_before_it_closes(): void
+    {
+        $this->setWindow(60);
+
+        $this->actingAs($this->dataEntry);
+
+        Child::factory()->create(['child_id' => '200000001']);
+
+        $payloads = $this->payloads();
+        $this->assertCount(1, $payloads, 'The first action must not wait for the window to close.');
+        $this->assertSame(1, $payloads[0]['record_count']);
+
+        $this->superAdmin->notifications()->update(['read_at' => now()]);
+
+        Child::factory()->create(['child_id' => '200000002']);
+
+        $payloads = $this->payloads();
+        $this->assertCount(1, $payloads, 'The second action must fold into the first notification.');
+        $this->assertSame(2, $payloads[0]['record_count']);
+        // Folding a new action in brings the notification back as unread.
+        $this->assertSame(1, $this->superAdmin->unreadNotifications()->count());
+    }
+
     public function test_different_modules_are_grouped_separately(): void
     {
         $this->setWindow(60);
-        Queue::fake();
 
         $this->actingAs($this->dataEntry);
 
@@ -310,7 +349,7 @@ class DataActionNotificationTest extends TestCase
             'phone_number' => '0599123456',
         ]);
 
-        Queue::assertPushed(DeliverDataActionNotification::class, 2);
+        $this->assertCount(2, $this->payloads());
     }
 
     public function test_bulk_writes_can_be_suppressed_for_a_single_summary(): void
@@ -349,23 +388,24 @@ class DataActionNotificationTest extends TestCase
     }
 
     // -----------------------------------------------------------------
-    // Delivery is queued, so the original request is not slowed down
+    // Delivery is inline, so nothing depends on a queue worker
     // -----------------------------------------------------------------
 
-    public function test_delivery_is_queued_rather_than_inline(): void
+    public function test_delivery_needs_no_queue_worker(): void
     {
         Queue::fake();
 
         $this->actingAs($this->dataEntry);
         Child::factory()->create();
 
-        Queue::assertPushed(DeliverDataActionNotification::class);
-        $this->assertSame(0, DatabaseNotification::query()->count());
+        // Nothing was handed to a worker, and the notification is already there.
+        Queue::assertNothingPushed();
+        $this->assertSame(1, DatabaseNotification::query()->count());
     }
 
-    public function test_the_notification_class_is_queueable(): void
+    public function test_the_notification_class_is_not_queued(): void
     {
-        $this->assertInstanceOf(
+        $this->assertNotInstanceOf(
             \Illuminate\Contracts\Queue\ShouldQueue::class,
             new DataActionNotification([
                 'action_type' => ActionType::CREATE,

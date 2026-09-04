@@ -18,11 +18,20 @@ class RoleResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-shield-check';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'إدارة النظام';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
 
-    protected static string|null $modelLabel = 'دور';
+    public static function getModelLabel(): string
+    {
+        return __('ui.roles.singular');
+    }
 
-    protected static string|null $pluralModelLabel = 'الأدوار';
+    public static function getPluralModelLabel(): string
+    {
+        return __('ui.roles.plural');
+    }
 
     public static function canAccess(): bool
     {
@@ -44,15 +53,15 @@ class RoleResource extends Resource
     {
         return [
             \Filament\Forms\Components\TextInput::make('name')
-                ->label('الاسم')
+                ->label(__('ui.roles.name'))
                 ->required()
                 ->maxLength(255)
                 ->unique(ignoreRecord: true)
                 ->validationMessages([
-                    'unique' => 'اسم الدور مستخدم مسبقاً.',
+                    'unique' => __('ui.validation.role_name_taken'),
                 ]),
             \Filament\Forms\Components\CheckboxList::make('permissions')
-                ->label('الصلاحيات')
+                ->label(__('ui.roles.permissions'))
                 ->relationship('permissions', 'name')
                 ->columns(2)
                 ->gridDirection('row')
@@ -65,18 +74,18 @@ class RoleResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')
-                    ->label('الاسم')
+                    ->label(__('ui.roles.name'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('permissions_count')
-                    ->label('عدد الصلاحيات')
+                    ->label(__('ui.roles.permissions_count'))
                     ->counts('permissions')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('users_count')
-                    ->label('عدد المستخدمين')
+                    ->label(__('ui.roles.users_count'))
                     ->counts('users')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('تاريخ الإنشاء')
+                    ->label(__('ui.roles.created_at'))
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),

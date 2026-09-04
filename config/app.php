@@ -78,7 +78,11 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    // The panel is written in Arabic - its navigation, model labels and
+    // form labels are Arabic strings, not translation keys - so Arabic is what
+    // an install with no APP_LOCALE set must come up in. English stays the
+    // fallback for any key Arabic has not translated.
+    'locale' => env('APP_LOCALE', 'ar'),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 

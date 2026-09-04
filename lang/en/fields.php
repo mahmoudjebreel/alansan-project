@@ -99,6 +99,7 @@ return [
     'female' => 'Female',
     'pregnant' => 'Pregnant',
     'lactating' => 'Lactating',
+    'pregnant_lactating' => 'Pregnant + Lactating',
     'government' => 'Government',
     'unrwa' => 'UNRWA',
     'other' => 'Other',
@@ -304,6 +305,7 @@ return [
     'age_months_only' => ':months m',
     'visit_date_n' => 'Visit :n Date',
     'visit_muac_n' => 'Visit :n MUAC',
+    'visit_fi_n' => 'Visit :n FI',
 
     // Excel import
     'import_excel' => 'Import Excel',
@@ -320,7 +322,7 @@ return [
     'import_missing_columns' => 'The file is missing these columns: :columns',
     'import_required' => ':field is required.',
     'import_invalid_boolean' => 'Invalid value for :field — must be :allowed.',
-    'import_invalid_option' => 'Invalid value for :field — must be one of: :allowed.',
+    'import_invalid_option' => 'Invalid value ":value" for :field — must be one of: :allowed.',
     'import_unreadable_option' => 'Could not verify the value for :field — its list of accepted options is unavailable, so the value was not accepted. Please report this to the system administrator.',
     'import_invalid_date' => 'Invalid date for :field.',
     'import_invalid_number' => ':field must be a number.',
@@ -353,4 +355,21 @@ return [
     'meal_discharges' => 'Discharges',
     'meal_unsupported_heading' => 'Columns this system does not capture',
     'meal_unsupported_hint' => 'These columns exist in the official template but have no field in the database, so they are left blank rather than filled with zero.',
+
+    // Children -> Follow Up Child referral and discharge
+    'record_state' => 'Record state',
+    'record_active' => 'Open',
+    'record_locked' => 'Closed',
+    'record_locked_notice' => 'This record was closed on discharge and can no longer be edited.',
+    'referred_to_follow_up_title' => 'Referred to Follow Up Children',
+    'referred_to_follow_up_body' => 'The visit for :name was saved in Children, and a follow-up record was opened because the reading came back :fi.',
+    'open_follow_up_record' => 'Open follow-up record',
+    'open_children_record' => 'Open child record',
+    'discharged_as_cured' => 'The child was discharged as cured and returned to the Children module.',
+    'kept_under_follow_up' => 'The child was kept under follow-up.',
+    'discharge_missing_data' => 'Cannot discharge: the child is missing a name, an ID number or a sex.',
+    'follow_up_created_from_children_only' => 'Follow-up records are opened automatically from the Children module when a SAM or MAM reading is recorded; they are not created by hand.',
+    // Pregnant & lactating: the most recent birth, asked separately from the
+    // newborn's own date of birth.
+    'last_newborn_dob' => 'Last newborn date of birth',
 ];

@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
+use App\Support\PublicUploads;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Traits\HasRoles;
 use Filament\Models\Contracts\HasAvatar;
 use Filament\Models\Contracts\FilamentUser;
@@ -61,7 +61,7 @@ class User extends Authenticatable implements FilamentUser, HasAvatar
 
     public function getAvatarUrlAttribute(): ?string
     {
-        return $this->avatar ? Storage::disk('public')->url($this->avatar) : null;
+        return PublicUploads::url($this->avatar);
     }
 
     public function getFilamentAvatarUrl(): ?string

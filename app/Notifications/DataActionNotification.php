@@ -5,22 +5,20 @@ namespace App\Notifications;
 use App\Support\Notifications\ActionType;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification as FilamentNotification;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 
 /**
  * One Super Admin notification about a data action.
  *
- * Queued, so that sending never adds latency to the save/delete/export/import
- * request that triggered it. Only the database channel is wired up for now;
- * adding 'mail' or 'broadcast' is a matter of returning them from via(),
- * because the payload is already assembled independently of the channel.
+ * Sent inline: the only channel is the database, so delivery is a single
+ * insert and a queue round-trip would cost more than it saves - and would
+ * make the bell depend on a worker being up. Adding 'mail' or 'broadcast'
+ * later is a matter of returning them from via() and making the class
+ * ShouldQueue again, because the payload is already assembled independently
+ * of the channel.
  */
-class DataActionNotification extends Notification implements ShouldQueue
+class DataActionNotification extends Notification
 {
-    use Queueable;
-
     /**
      * @param  array<string, mixed>  $payload  See ActionPayload::build().
      */
@@ -69,7 +67,7 @@ class DataActionNotification extends Notification implements ShouldQueue
         if (filled($this->payload['reference_url'] ?? null)) {
             $notification->actions([
                 Action::make('view')
-                    ->label('عرض السجل')
+                    ->label(__('ui.notifications.view_record'))
                     ->url($this->payload['reference_url'])
                     ->markAsRead(),
             ]);

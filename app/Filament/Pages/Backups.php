@@ -13,15 +13,24 @@ class Backups extends Page
 {
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-circle-stack';
 
-    protected static ?string $navigationLabel = 'النسخ الاحتياطي';
-
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $title = 'إدارة النسخ الاحتياطي';
-
     protected static ?int $navigationSort = 20;
 
     protected string $view = 'filament.pages.backups';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.backups.navigation');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.backup');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.backups.title');
+    }
 
     public static function canAccess(): bool
     {
@@ -32,20 +41,20 @@ class Backups extends Page
     {
         return [
             Action::make('create_backup')
-                ->label('إنشاء وتحميل نسخة SQL مباشرة')
+                ->label(__('ui.backups.create'))
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('success')
                 ->requiresConfirmation()
-                ->modalHeading('إنشاء وتنزيل نسخة احتياطية')
-                ->modalDescription('سيتم إنشاء نسخة احتياطية من قاعدة البيانات بصيغة .sql وتنزيلها تلقائياً على جهازك. هل تريد المتابعة؟')
-                ->modalSubmitActionLabel('نعم، أنشئ ونزّل النسخة')
+                ->modalHeading(__('ui.backups.modal_heading'))
+                ->modalDescription(__('ui.backups.modal_description'))
+                ->modalSubmitActionLabel(__('ui.backups.modal_submit'))
                 ->action(function (): ?BinaryFileResponse {
                     try {
                         $filePath = $this->createSqlBackup();
 
                         Notification::make()
-                            ->title('تم إنشاء النسخة الاحتياطية بنجاح')
-                            ->body('جاري تنزيل الملف على جهازك...')
+                            ->title(__('ui.backups.created_title'))
+                            ->body(__('ui.backups.created_body'))
                             ->success()
                             ->send();
 
@@ -54,7 +63,7 @@ class Backups extends Page
                         ]);
                     } catch (\Exception $e) {
                         Notification::make()
-                            ->title('فشل إنشاء النسخة الاحتياطية')
+                            ->title(__('ui.backups.failed_title'))
                             ->body($e->getMessage())
                             ->danger()
                             ->send();

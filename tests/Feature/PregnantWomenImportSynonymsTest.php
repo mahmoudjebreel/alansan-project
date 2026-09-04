@@ -697,23 +697,59 @@ class PregnantWomenImportSynonymsTest extends TestCase
 
     public function test_other_modules_keep_reading_their_files_unchanged(): void
     {
-        // The normalisation hook is overridden for this module only: the shared
-        // engine's default has to leave every other module's cells alone.
-        $default = new \ReflectionMethod(\App\Imports\AbstractTableImport::class, 'normaliseValue');
-        $default->setAccessible(true);
+        // The date reader is carried by this module's import definition rather
+        // than by a subclass of the shared engine, so "unchanged for everyone
+        // else" is a property of the definitions: no other module names one.
+        $pregnant = ImportDefinition::get('pregnant');
+
+        $this->assertSame(PregnantWomanImportDates::class, $pregnant->dateReader);
+        $this->assertNotSame([], $pregnant->synonyms);
+
+        $pregnantMap = PregnantWomanImportSynonyms::forImportDefinition();
 
         foreach (['children', 'group_sessions', 'mother_to_mother', 'individual_counseling', 'follow_up_children'] as $key) {
-            $importer = new \ReflectionClass(\App\Services\ExcelImportService::class);
-            $resolve = $importer->getMethod('importerFor');
-            $resolve->setAccessible(true);
+            $definition = ImportDefinition::get($key);
 
-            $class = $resolve->invoke(new \App\Services\ExcelImportService(), ImportDefinition::get($key));
-
-            $this->assertSame(
-                \App\Imports\AbstractTableImport::class,
-                (new \ReflectionMethod($class, 'normaliseValue'))->getDeclaringClass()->getName(),
-                "[{$class}] must keep the shared engine's untouched normalisation.",
+            $this->assertNull(
+                $definition->dateReader,
+                "[{$key}] must keep reading its dates the way the shared engine always did.",
             );
+
+            // Every module has its own map now, and several of them cover a
+            // column of the same name - visit_type is visit_type everywhere.
+            // Sharing a column name is expected; sharing this module's table
+            // is not, because the vocabularies genuinely differ (a `locality`
+            // is a neighbourhood in one module and a camp in the next).
+            $this->assertNotSame(
+                $pregnantMap,
+                $definition->synonyms,
+                "[{$key}] must carry its own synonym map, not this module's.",
+            );
+
+            foreach (array_keys($pregnantMap) as $field) {
+                if (! array_key_exists($field, $definition->synonyms)) {
+                    continue;
+                }
+
+                $this->assertNotSame(
+                    $pregnantMap[$field],
+                    $definition->synonyms[$field],
+                    "[{$key}.{$field}] is this module's table verbatim; write the module's own.",
+                );
+            }
         }
+    }
+
+    public function test_the_shared_date_reading_is_untouched_without_a_date_reader(): void
+    {
+        // A module with no date reader still reads a real Excel serial, and
+        // still refuses a cell that is not a date at all.
+        $schema = new ImportSchema(ImportDefinition::get('children'));
+
+        $this->assertNull(ImportDefinition::get('children')->dateReader);
+
+        $refused = $schema->castValue('date_of_reporting', 'not a date');
+
+        $this->assertFalse($refused['ok']);
     }
 }

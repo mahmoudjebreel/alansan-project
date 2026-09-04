@@ -18,8 +18,8 @@ use Filament\Schemas\Schema;
  *
  * Kept as its own page rather than as a section of ManageSettings: that page
  * saves all of its fields in one action, and folding an unrelated group into
- * it would tie the two together. It sits in the same "إدارة النظام" group,
- * directly under the general settings.
+ * it would tie the two together. It sits in the same system-management
+ * group, directly under the general settings.
  */
 class NotificationSettingsPage extends Page implements HasForms
 {
@@ -27,17 +27,26 @@ class NotificationSettingsPage extends Page implements HasForms
 
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-bell-alert';
 
-    protected static ?string $navigationLabel = 'إعدادات الإشعارات';
-
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $title = 'إعدادات الإشعارات';
-
     protected static ?int $navigationSort = 11;
 
     protected string $view = 'filament.pages.notification-settings-page';
 
     public ?array $data = [];
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.notification_settings.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.notification_settings.title');
+    }
 
     public static function canAccess(): bool
     {
@@ -61,55 +70,55 @@ class NotificationSettingsPage extends Page implements HasForms
     {
         return $form
             ->schema([
-                \Filament\Schemas\Components\Section::make('تشغيل الإشعارات')
-                    ->description('مفتاح رئيسي لإيقاف أو تشغيل نظام الإشعارات بالكامل')
+                \Filament\Schemas\Components\Section::make(__('ui.notification_settings.switch_section'))
+                    ->description(__('ui.notification_settings.switch_description'))
                     ->icon('heroicon-o-power')
                     ->schema([
                         Forms\Components\Toggle::make('enabled')
-                            ->label('تفعيل نظام الإشعارات')
-                            ->helperText('عند الإيقاف لن يتم إرسال أي إشعار، مع بقاء السجل السابق كما هو.')
-                            ->extraAttributes(['aria-label' => 'تفعيل نظام الإشعارات']),
+                            ->label(__('ui.notification_settings.enabled'))
+                            ->helperText(__('ui.notification_settings.enabled_help'))
+                            ->extraAttributes(['aria-label' => __('ui.notification_settings.enabled')]),
                         Forms\Components\Toggle::make('notify_self_actions')
-                            ->label('تضمين إجراءات مدير النظام (Super Admin) في الإشعارات')
-                            ->helperText('م مفيد للتجربة والاختبار: عند التفعيل يتم إرسال إشعار حتى عند قيام مدير النظام بالإجراء بنفسه.')
-                            ->extraAttributes(['aria-label' => 'تضمين إجراءات مدير النظام']),
+                            ->label(__('ui.notification_settings.notify_self'))
+                            ->helperText(__('ui.notification_settings.notify_self_help'))
+                            ->extraAttributes(['aria-label' => __('ui.notification_settings.notify_self')]),
                     ]),
 
-                \Filament\Schemas\Components\Section::make('أنواع الإجراءات')
-                    ->description('اختر الإجراءات التي تُرسل إشعاراً')
+                \Filament\Schemas\Components\Section::make(__('ui.notification_settings.actions_section'))
+                    ->description(__('ui.notification_settings.actions_description'))
                     ->icon('heroicon-o-adjustments-horizontal')
                     ->schema([
                         Forms\Components\CheckboxList::make('enabled_actions')
-                            ->label('الإجراءات المفعّلة')
+                            ->label(__('ui.notification_settings.enabled_actions'))
                             ->hiddenLabel()
                             ->options(ActionType::options())
                             ->columns(3)
                             ->bulkToggleable(),
                     ]),
 
-                \Filament\Schemas\Components\Section::make('المستلمون')
-                    ->description('حدد مديري النظام الذين يستلمون الإشعارات')
+                \Filament\Schemas\Components\Section::make(__('ui.notification_settings.recipients_section'))
+                    ->description(__('ui.notification_settings.recipients_description'))
                     ->icon('heroicon-o-user-group')
                     ->schema([
                         Forms\Components\Select::make('recipient_user_ids')
-                            ->label('المستلمون')
-                            ->helperText('اتركه فارغاً لإرسال الإشعارات إلى جميع مديري النظام.')
+                            ->label(__('ui.notification_settings.recipients'))
+                            ->helperText(__('ui.notification_settings.recipients_help'))
+                            ->placeholder(__('ui.notification_settings.recipients_placeholder'))
                             ->multiple()
-                            ->options(fn (): array => User::role('Super Admin')
-                                ->orderBy('name')
-                                ->pluck('name', 'id')
-                                ->all())
+                            // Every user, not only the Super Admins: naming an
+                            // Admin here is what makes the bell ring for them.
+                            ->options(fn (): array => static::recipientOptions())
                             ->searchable()
                             ->native(false),
                     ]),
 
-                \Filament\Schemas\Components\Section::make('تجميع الإشعارات')
-                    ->description('دمج الإجراءات المتتابعة لنفس المستخدم في إشعار واحد')
+                \Filament\Schemas\Components\Section::make(__('ui.notification_settings.grouping_section'))
+                    ->description(__('ui.notification_settings.grouping_description'))
                     ->icon('heroicon-o-rectangle-stack')
                     ->schema([
                         Forms\Components\TextInput::make('group_window_seconds')
-                            ->label('مدة التجميع (بالثواني)')
-                            ->helperText('مثال: 60 يعني دمج إضافات نفس المستخدم خلال دقيقة في إشعار واحد. الصفر يعني إرسال كل إجراء على حدة.')
+                            ->label(__('ui.notification_settings.group_window'))
+                            ->helperText(__('ui.notification_settings.group_window_help'))
                             ->numeric()
                             ->minValue(0)
                             ->maxValue(3600)
@@ -123,7 +132,7 @@ class NotificationSettingsPage extends Page implements HasForms
     {
         return [
             Action::make('save')
-                ->label('حفظ الإعدادات')
+                ->label(__('ui.common.save'))
                 ->icon('heroicon-o-check')
                 ->action(function (): void {
                     $data = $this->form->getState();
@@ -144,10 +153,28 @@ class NotificationSettingsPage extends Page implements HasForms
                     $settings->save();
 
                     Notification::make()
-                        ->title('تم حفظ إعدادات الإشعارات')
+                        ->title(__('ui.notification_settings.saved'))
                         ->success()
                         ->send();
                 }),
         ];
+    }
+
+    /**
+     * Every user the panel can notify, labelled with the role they hold so two
+     * people with the same name can be told apart.
+     *
+     * @return array<int, string>
+     */
+    protected static function recipientOptions(): array
+    {
+        return User::query()
+            ->with('roles:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->mapWithKeys(fn (User $user): array => [
+                $user->getKey() => $user->name . ' — ' . ($user->getRoleNames()->first() ?? __('ui.notification_settings.no_role')),
+            ])
+            ->all();
     }
 }

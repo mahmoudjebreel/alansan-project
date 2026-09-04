@@ -15,13 +15,22 @@ class ActivityLogPage extends Page implements HasTable
 
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-clipboard-document-list';
 
-    protected static string | \UnitEnum | null $navigationGroup = 'إدارة النظام';
-
-    protected static ?string $navigationLabel = 'سجل النشاطات';
-
-    protected static ?string $title = 'سجل النشاطات';
-
     protected string $view = 'filament.pages.activity-log-page';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('ui.activity_log.title');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('ui.nav.system');
+    }
+
+    public function getTitle(): string
+    {
+        return __('ui.activity_log.title');
+    }
 
     public static function canAccess(): bool
     {
@@ -34,24 +43,24 @@ class ActivityLogPage extends Page implements HasTable
             ->query(Activity::query()->latest())
             ->columns([
                 Tables\Columns\TextColumn::make('log_name')
-                    ->label('اسم السجل')
+                    ->label(__('ui.activity_log.log_name'))
                     ->searchable()
                     ->sortable()
                     ->badge(),
                 Tables\Columns\TextColumn::make('description')
-                    ->label('الوصف')
+                    ->label(__('ui.activity_log.description'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('subject_type')
-                    ->label('نوع الكائن')
+                    ->label(__('ui.activity_log.subject_type'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('subject_id')
-                    ->label('معرف الكائن')
+                    ->label(__('ui.activity_log.subject_id'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('causer.name')
-                    ->label('الفاعل')
+                    ->label(__('ui.activity_log.causer'))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('تاريخ الإنشاء')
+                    ->label(__('ui.activity_log.created_at'))
                     ->dateTime()
                     ->sortable(),
             ]);
