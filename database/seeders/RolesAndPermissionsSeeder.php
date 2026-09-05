@@ -67,6 +67,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'mother_to_mother.import',
             'individual_counseling.import',
             'follow_up_children.import',
+            // Referral Centre: reviewing an upload's SAM/MAM children
+            'children.refer',
             // Trash (Recycle Bin)
             'trash.view',
             'trash.restore',
@@ -96,6 +98,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'trash.view', 'trash.restore', 'trash.force_delete',
             'children.import', 'pregnant.import', 'group_sessions.import', 'mother_to_mother.import', 'individual_counseling.import', 'follow_up_children.import',
             'meal_report.view', 'meal_report.export',
+            'children.refer',
         ]);
 
         // Create Data Entry role
@@ -108,6 +111,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'individual_counseling.view', 'individual_counseling.create', 'individual_counseling.edit',
             'follow_up_children.view', 'follow_up_children.create', 'follow_up_children.edit',
             'children.import', 'pregnant.import', 'group_sessions.import', 'mother_to_mother.import', 'individual_counseling.import', 'follow_up_children.import',
+            'children.refer',
         ]);
 
         // Create Viewer role

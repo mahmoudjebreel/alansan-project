@@ -96,6 +96,46 @@ return [
     ],
 
     // -----------------------------------------------------------------
+    // Referral Centre: reviewing an upload's SAM/MAM children
+    // -----------------------------------------------------------------
+    'referral_center' => [
+        'title' => 'Referral Centre',
+        'nav' => 'Referral Centre',
+        'description' => 'Children screened at SAM or MAM who are not yet under follow-up. Review them, then refer the ones that should be admitted.',
+        'batch' => 'Import batch',
+        'batch_label' => ':date · :count rows · :user',
+        'all_batches' => 'All children (not limited to one upload)',
+        'unknown_user' => 'Unknown',
+        'no_batch_notice' => 'No import batch has been recorded yet, so every eligible child on file is listed.',
+        'summary' => [
+            'total' => 'Total',
+            'normal' => 'Normal',
+            'mam' => 'MAM',
+            'sam' => 'SAM',
+            'unmeasured' => 'No MUAC',
+            'eligible' => 'Eligible for referral',
+        ],
+        'columns' => [
+            'classification' => 'SAM / MAM',
+            'status' => 'Referral status',
+            'age' => 'Age',
+        ],
+        'status' => [
+            'pending' => 'Awaiting review',
+        ],
+        'refer_selected' => 'Refer selected',
+        'confirm_heading' => 'Confirm referral',
+        'confirm_body' => 'A follow-up record and an initial visit will be opened for each selected child. The Children records themselves are not moved or changed.',
+        'confirm_submit' => 'Confirm referral',
+        'referred' => 'Referred :count children to follow-up.',
+        'skipped' => ':count were skipped (already under follow-up, or no longer SAM/MAM).',
+        'failed' => ':count could not be referred and were left for a retry.',
+        'nothing_selected' => 'No children were selected.',
+        'empty_heading' => 'No children are waiting for referral',
+        'empty_description' => 'Every SAM or MAM child in this selection is already under follow-up.',
+    ],
+
+    // -----------------------------------------------------------------
     // Children -> Follow Up referral prompt
     // -----------------------------------------------------------------
     'referral' => [

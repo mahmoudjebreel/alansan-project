@@ -114,6 +114,15 @@ class AppServiceProvider extends ServiceProvider
             \App\Events\ExcelActionOccurred::class,
             [\App\Listeners\SendSuperAdminNotification::class, 'onExcelAction'],
         );
+
+        // Notes the primary-key window a Children upload wrote, so the
+        // Referral Centre can offer "the upload that just finished" as a
+        // filter. Runs after the import has committed and swallows its own
+        // failures, so it can neither delay nor undo an upload.
+        Event::listen(
+            \App\Events\ExcelActionOccurred::class,
+            [\App\Listeners\RecordReferralBatch::class, 'onExcelAction'],
+        );
     }
 
     /**

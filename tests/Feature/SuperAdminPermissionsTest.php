@@ -86,9 +86,12 @@ class SuperAdminPermissionsTest extends TestCase
 
     public function test_the_other_roles_did_not_gain_anything(): void
     {
+        // Both roles gained children.refer with the Referral Centre: the two
+        // roles that may already open a follow-up episode by hand are the two
+        // that may open one from a reviewed upload.
         $expected = [
-            'Admin' => 42,
-            'Data Entry' => 24,
+            'Admin' => 43,
+            'Data Entry' => 25,
             'Viewer' => 12,
             'M&E' => 8,
         ];
