@@ -105,7 +105,10 @@ class YesNoFieldAccessibilityTest extends TestCase
             }
         }
 
-        $this->assertSame(24, $asserted, 'Unexpected number of Yes/No fields.');
+        // 23, not 24: the group sessions' "receives supplementary" column
+        // stopped being a yes/no answer and now records which commodity was
+        // handed out, as the Mother to Mother module always did.
+        $this->assertSame(23, $asserted, 'Unexpected number of Yes/No fields.');
     }
 
     /**

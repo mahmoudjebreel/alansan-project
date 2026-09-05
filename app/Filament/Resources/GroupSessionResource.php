@@ -158,7 +158,13 @@ class GroupSessionResource extends Resource
                     ])
                     ->maxLength(255),
                 BooleanSelectField::make('has_gsfsh', __('fields.has_gsfsh')),
-                BooleanSelectField::make('receives_supplementary', __('fields.receives_supplementary')),
+                // Not a yes/no answer: the sheets name the commodity that
+                // was handed out - "HEB", "RUCF+HEB+LNS" - and the column has
+                // been a nullable string since the 2026_08_26 migration.
+                // Mother-to-Mother already records it as free text.
+                \Filament\Forms\Components\TextInput::make('receives_supplementary')
+                    ->label(__('fields.receives_supplementary'))
+                    ->maxLength(255),
             ])->columns(2);
     }
 
@@ -244,7 +250,7 @@ class GroupSessionResource extends Resource
             'marital_status' => $record->marital_status,
             'phone_number' => $record->phone_number,
             'has_gsfsh' => (bool) $record->has_gsfsh,
-            'receives_supplementary' => (bool) $record->receives_supplementary,
+            'receives_supplementary' => $record->receives_supplementary,
         ];
     }
 
@@ -286,7 +292,7 @@ class GroupSessionResource extends Resource
                     FilamentInfolist::enum('marital_status'),
                     FilamentInfolist::text('phone_number'),
                     FilamentInfolist::boolean('has_gsfsh'),
-                    FilamentInfolist::boolean('receives_supplementary'),
+                    FilamentInfolist::text('receives_supplementary'),
                 ])->columns(2),
         ]);
     }
@@ -320,7 +326,7 @@ class GroupSessionResource extends Resource
                 Tables\Columns\TextColumn::make('category')->label(__('fields.category'))->formatStateUsing(fn (string $state): string => __('fields.' . $state)),
                 YesNoColumn::make('is_pwd')->label(__('fields.is_pwd'))->toggleable(isToggledHiddenByDefault: true),
                 YesNoColumn::make('has_gsfsh')->label(__('fields.has_gsfsh'))->toggleable(isToggledHiddenByDefault: true),
-                YesNoColumn::make('receives_supplementary')->label(__('fields.receives_supplementary'))->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('receives_supplementary')->label(__('fields.receives_supplementary'))->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('session_date', 'desc')
             ->filters([
@@ -371,7 +377,7 @@ class GroupSessionResource extends Resource
 
     public static function subjectOptions(): array { return ['bf_support' => __('fields.bf_support'), 'relactation' => __('fields.relactation'), 'complimentary_feeding' => __('fields.complimentary_feeding'), 'other' => __('fields.other')]; }
     public static function localityOptions(): array { return ['tal_al_hawa' => __('fields.tal_al_hawa'), 'el_saftawi' => __('fields.el_saftawi'), 'el_nafaq' => __('fields.el_nafaq'), 'el_shatee' => __('fields.el_shatee'), 'karamah' => __('fields.karamah')]; }
-    public static function shelterOptions(): array { return ['mosaab_camp' => __('fields.mosaab_camp'), 'mahabba' => __('fields.mahabba'), 'el_salam' => __('fields.el_salam'), 'el_qoqa' => __('fields.el_qoqa')]; }
+    public static function shelterOptions(): array { return ['mosaab_camp' => __('fields.mosaab_camp'), 'mahabba' => __('fields.mahabba'), 'el_salam' => __('fields.el_salam'), 'el_qoqa' => __('fields.el_qoqa'), 'al_helou' => __('fields.al_helou')]; }
     public static function visitTypeOptions(): array { return ['new' => __('fields.new'), 'follow_up' => __('fields.follow_up')]; }
     /**
      * Selectable participant categories. The keys are exactly the values the

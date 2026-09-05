@@ -311,6 +311,168 @@ class ModuleImportSynonymsTest extends TestCase
         $this->assertNull($child->income_source);
     }
 
+    public function test_children_read_a_yes_no_column_stored_as_a_real_excel_boolean(): void
+    {
+        // Not the words "Yes" and "No" - the boolean cells a workbook holds
+        // when its Yes/No columns were filled in from a checkbox or produced
+        // by another system. PHP receives true and false, and (string) false
+        // is the empty string, so every row answering "no" was refused with
+        // "must be Yes / No" while the identical column written as text
+        // imported without a murmur.
+        $result = $this->import('children', [$this->childRow([
+            __('fields.is_enrolled_bsfp') => false,
+            __('fields.has_unaccompanied_children') => false,
+            __('fields.has_released_children') => false,
+            __('fields.has_injured_after_oct7') => false,
+            __('fields.has_family_disability') => false,
+            __('fields.is_pwd') => true,
+        ])]);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(1, $result['imported']);
+
+        $child = Child::first();
+
+        $this->assertFalse((bool) $child->is_enrolled_bsfp);
+        $this->assertFalse((bool) $child->has_unaccompanied_children);
+        $this->assertFalse((bool) $child->has_released_children);
+        $this->assertFalse((bool) $child->has_injured_after_oct7);
+        $this->assertFalse((bool) $child->has_family_disability);
+        $this->assertTrue((bool) $child->is_pwd);
+    }
+
+    public function test_children_read_a_yes_no_column_written_as_a_decimal(): void
+    {
+        // "1.0" and "0.00" are the same answer a spreadsheet writes when the
+        // column was formatted as a number. A 2 is not an answer at all and
+        // still fails, so the column has not become a free-for-all.
+        $accepted = $this->import('children', [$this->childRow([
+            __('fields.is_enrolled_bsfp') => '1.0',
+            __('fields.is_sick_last_6_months') => '0.00',
+        ])]);
+
+        $this->assertSame([], $accepted['errors']);
+        $this->assertTrue((bool) Child::first()->is_enrolled_bsfp);
+        $this->assertFalse((bool) Child::first()->is_sick_last_6_months);
+
+        $refused = $this->import('children', [$this->childRow([
+            __('fields.child_id') => '987654321',
+            __('fields.is_enrolled_bsfp') => '2',
+        ])]);
+
+        $this->assertSame(0, $refused['imported']);
+        $this->assertCount(1, $refused['errors']);
+    }
+
+    public function test_children_read_the_income_and_disability_spellings_the_files_use(): void
+    {
+        // The two columns the sheets write in prose rather than in the form's
+        // vocabulary. The bracketed spelling was already accepted and told us
+        // nothing about the same words without brackets, which is what the
+        // files are mostly written in: normalising unifies letter forms, it
+        // does not remove brackets or the definite article.
+        $result = $this->import('children', [$this->childRow([
+            __('fields.income_source') => 'وكالة أونروا',
+            __('fields.disability_cause') => 'إصابة حرب',
+        ])]);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame('unrwa', Child::first()->income_source);
+        $this->assertSame('war', Child::first()->disability_cause);
+
+        foreach ([
+            'الحكومة' => 'government',
+            'حكومية' => 'government',
+            'الوكالة' => 'unrwa',
+            'وكالة الغوث' => 'unrwa',
+            'غير ذلك' => 'other',
+            'Others' => 'other',
+        ] as $spelling => $stored) {
+            Child::query()->forceDelete();
+
+            $result = $this->import('children', [$this->childRow([
+                __('fields.income_source') => $spelling,
+            ])]);
+
+            $this->assertSame([], $result['errors'], "[{$spelling}] was refused.");
+            $this->assertSame($stored, Child::first()->income_source);
+        }
+    }
+
+    public function test_children_still_refuse_an_income_source_that_is_simply_wrong(): void
+    {
+        $result = $this->import('children', [$this->childRow([
+            __('fields.income_source') => 'مصدر لا وجود له',
+        ])]);
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertCount(1, $result['errors']);
+        $this->assertStringContainsString(__('fields.income_source'), $result['errors'][0]);
+    }
+
+    public function test_children_read_a_hand_typed_date_day_first(): void
+    {
+        // The same reading the Pregnant / Lactating workbooks needed, and for
+        // the same reason: Carbon reads a slashed date month-first, so
+        // "31/12/1990" was refused outright - which is what failed rows on
+        // "Invalid date for Mother Date of Birth" - and "7/12/2020" imported
+        // as the 12th of July with nothing said.
+        $result = $this->import('children', [$this->childRow([
+            __('fields.date_of_reporting') => '15/03/2025',
+            __('fields.date_of_birth') => '7/12/2020',
+            __('fields.mother_date_of_birth') => '31/12/1990',
+        ])]);
+
+        $this->assertSame([], $result['errors']);
+
+        $child = Child::first();
+
+        $this->assertSame('2025-03-15', $child->date_of_reporting->format('Y-m-d'));
+        $this->assertSame('2020-12-07', $child->date_of_birth->format('Y-m-d'));
+        $this->assertSame('1990-12-31', $child->mother_date_of_birth->format('Y-m-d'));
+    }
+
+    public function test_children_accept_an_empty_mother_date_of_birth(): void
+    {
+        // The mother's details are optional on a record about the child, and a
+        // historical sheet leaves this column empty in every shape a sheet has
+        // for "nothing here".
+        foreach (['', '   ', "\u{00A0}", '-', '0', '00/00/0000'] as $blank) {
+            Child::query()->forceDelete();
+
+            $result = $this->import('children', [$this->childRow([
+                __('fields.mother_date_of_birth') => $blank,
+            ])]);
+
+            $this->assertSame([], $result['errors'], 'A blank mother date of birth was refused.');
+            $this->assertNull(Child::first()->mother_date_of_birth);
+        }
+    }
+
+    public function test_an_unreadable_mother_date_of_birth_costs_the_cell_not_the_row(): void
+    {
+        $result = $this->import('children', [$this->childRow([
+            __('fields.mother_date_of_birth') => '31/4/2025',
+        ])]);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(1, $result['imported']);
+        $this->assertNull(Child::first()->mother_date_of_birth);
+    }
+
+    public function test_an_unreadable_date_in_a_column_the_record_needs_still_fails_the_row(): void
+    {
+        // The reporting date is NOT NULL and the child's own date of birth is
+        // what the age in months is computed from. Neither may be silently
+        // emptied the way the mother's may.
+        foreach ([__('fields.date_of_reporting'), __('fields.date_of_birth')] as $heading) {
+            $result = $this->import('children', [$this->childRow([$heading => 'not a date'])]);
+
+            $this->assertSame(0, $result['imported'], "[{$heading}] was accepted unread.");
+            $this->assertNotSame([], $result['errors']);
+        }
+    }
+
     // =================================================================
     // Group Sessions
     // =================================================================

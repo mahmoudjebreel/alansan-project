@@ -143,7 +143,10 @@ class BooleanSelectFieldTest extends TestCase
         }
 
         // Guards against the loop silently asserting nothing at all.
-        $this->assertSame(24, $asserted, 'Unexpected number of Yes/No fields.');
+        // 23, not 24: the group sessions' "receives supplementary" column
+        // stopped being a yes/no answer and now records which commodity was
+        // handed out, as the Mother to Mother module always did.
+        $this->assertSame(23, $asserted, 'Unexpected number of Yes/No fields.');
     }
 
     public function test_the_shared_field_converts_between_boolean_state_and_zero_or_one(): void

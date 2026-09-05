@@ -6,6 +6,7 @@ use App\Imports\ImportDefinition;
 use App\Models\PregnantLactatingWoman;
 use App\Models\User;
 use App\Services\ExcelImportService;
+use App\Support\Import\ChildImportDates;
 use App\Support\Import\PregnantWomanImportDates;
 use App\Support\Import\PregnantWomanImportSynonyms;
 use App\Support\ImportSchema;
@@ -697,22 +698,32 @@ class PregnantWomenImportSynonymsTest extends TestCase
 
     public function test_other_modules_keep_reading_their_files_unchanged(): void
     {
-        // The date reader is carried by this module's import definition rather
-        // than by a subclass of the shared engine, so "unchanged for everyone
-        // else" is a property of the definitions: no other module names one.
+        // The date reader is carried by each module's own import definition
+        // rather than by a subclass of the shared engine, so "unchanged for
+        // everyone else" is a property of the definitions: a module either
+        // names its own reader or names none, and never this one.
         $pregnant = ImportDefinition::get('pregnant');
 
         $this->assertSame(PregnantWomanImportDates::class, $pregnant->dateReader);
         $this->assertNotSame([], $pregnant->synonyms);
+
+        // The children workbooks turned out to be written by the same hands,
+        // and to carry the same hand-typed dates, so that module now reads its
+        // own - a separate class, over its own columns.
+        $this->assertSame(
+            ChildImportDates::class,
+            ImportDefinition::get('children')->dateReader,
+        );
 
         $pregnantMap = PregnantWomanImportSynonyms::forImportDefinition();
 
         foreach (['children', 'group_sessions', 'mother_to_mother', 'individual_counseling', 'follow_up_children'] as $key) {
             $definition = ImportDefinition::get($key);
 
-            $this->assertNull(
+            $this->assertNotSame(
+                PregnantWomanImportDates::class,
                 $definition->dateReader,
-                "[{$key}] must keep reading its dates the way the shared engine always did.",
+                "[{$key}] must not be reading its dates through this module's reader.",
             );
 
             // Every module has its own map now, and several of them cover a
@@ -744,12 +755,17 @@ class PregnantWomenImportSynonymsTest extends TestCase
     {
         // A module with no date reader still reads a real Excel serial, and
         // still refuses a cell that is not a date at all.
-        $schema = new ImportSchema(ImportDefinition::get('children'));
+        $schema = new ImportSchema(ImportDefinition::get('group_sessions'));
 
-        $this->assertNull(ImportDefinition::get('children')->dateReader);
+        $this->assertNull(ImportDefinition::get('group_sessions')->dateReader);
 
-        $refused = $schema->castValue('date_of_reporting', 'not a date');
+        $refused = $schema->castValue('session_date', 'not a date');
 
         $this->assertFalse($refused['ok']);
+
+        $read = $schema->castValue('session_date', 45000);
+
+        $this->assertTrue($read['ok']);
+        $this->assertSame('2023-03-15', $read['value']->format('Y-m-d'));
     }
 }

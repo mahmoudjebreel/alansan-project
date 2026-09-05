@@ -134,6 +134,24 @@ final class ImportSchema
             }
         }
 
+        // Only now: a heading the module accepts as an alias of a real column.
+        // Checked after every canonical spelling, exactly as the value synonyms
+        // are, so an alias can never take a column away from the heading the
+        // export itself writes.
+        $fields = $this->definition->fields();
+
+        foreach ($this->definition->headingAliases as $field => $spellings) {
+            if (! in_array($field, $fields, true)) {
+                continue; // An alias for a column this module does not carry.
+            }
+
+            foreach ($spellings as $spelling) {
+                if ($heading === $this->normalise((string) $spelling)) {
+                    return ['type' => 'field', 'field' => $field];
+                }
+            }
+        }
+
         if ($this->definition->hasVisits()) {
             foreach ($this->visitNumbers() as $i) {
                 foreach (self::LOCALES as $locale) {
@@ -199,7 +217,7 @@ final class ImportSchema
     public function castValue(string $field, mixed $value): array
     {
         if (is_string($value)) {
-            $value = trim($value);
+            $value = self::clean($value);
 
             // A sheet typed by hand spells the same thing with one space and
             // with three; squeeze them so the two do not become two spellings.
@@ -229,6 +247,38 @@ final class ImportSchema
 
     private function castBoolean(string $field, mixed $value): array
     {
+        // A cell holding nothing but blanks, zero-width marks or a placeholder
+        // dash is an unanswered question, not a wrong answer. castValue()
+        // already reads a genuinely empty cell that way; "-" and a
+        // non-breaking space are the same statement typed differently, and
+        // failing a row over one was refusing a sheet for saying nothing. A
+        // NOT NULL column still ends up false, through defaults().
+        if ($this->isPlaceholder($value)) {
+            return ['ok' => true, 'value' => null];
+        }
+
+        // A cell that already is a boolean. A workbook whose Yes/No columns
+        // hold real Excel TRUE/FALSE values - rather than the words - hands
+        // PHP a bool, and (string) false is the empty string, which matched
+        // none of the spellings below. So every row answering "no" in such a
+        // column was refused, while the very same column answered "No" as text
+        // imported without a murmur. The value needs no reading at all.
+        if (is_bool($value)) {
+            return ['ok' => true, 'value' => $value];
+        }
+
+        // A cell that arrived as a number. 1 and 0 already read correctly as
+        // strings, but a spreadsheet storing them as decimals writes "1.0" and
+        // "0.00", which do not. Only those two values are accepted: a 2 in a
+        // Yes/No column is a mistake, not an answer, and still fails.
+        if (is_numeric($value)) {
+            $number = (float) $value;
+
+            if ($number === 1.0 || $number === 0.0) {
+                return ['ok' => true, 'value' => $number === 1.0];
+            }
+        }
+
         $needle = $this->normalise((string) $value);
 
         $truthy = ['1', 'true', 'yes', 'y'];
@@ -247,11 +297,30 @@ final class ImportSchema
             return ['ok' => true, 'value' => false];
         }
 
+        // Only now: a spelling the module accepts as an alias of yes or no.
+        // Checked last, exactly as the enum aliases are, so a module map can
+        // never redefine نعم / لا themselves.
+        foreach ($this->definition->synonyms[$field] ?? [] as $alias => $stored) {
+            if ($needle === $this->normalise((string) $alias)) {
+                return ['ok' => true, 'value' => filter_var($stored, FILTER_VALIDATE_BOOL)];
+            }
+        }
+
         return [
             'ok' => false,
             'message' => __('fields.import_invalid_boolean', [
+                // Naming the cell that was refused, exactly as the enum message
+                // does. Without it a Yes/No column that has quietly been filled
+                // from the wrong source column - a marital status under "has a
+                // lactating woman" - reports five hundred identical lines that
+                // say only which column is unhappy, and the misalignment that
+                // caused them stays invisible.
+                'value' => self::describe($value),
                 'field' => __('fields.' . $field),
-                'allowed' => __('fields.yes') . ' / ' . __('fields.no'),
+                'allowed' => $this->acceptedSpellings($field, [
+                    __('fields.yes'),
+                    __('fields.no'),
+                ]),
             ]),
         ];
     }
@@ -321,6 +390,47 @@ final class ImportSchema
     }
 
     /**
+     * Strip the invisible marks a cell carries around its real value.
+     *
+     * An Arabic sheet is full of Unicode format characters - the right-to-left
+     * mark above all - that a spreadsheet inserts to lay a mixed-direction cell
+     * out and that carry no data whatsoever. trim() stops at the ASCII space,
+     * so a cell holding U+200F followed by "0" reached the numeric check as a
+     * two-character string, failed it, and reported a rejected value that looked
+     * identical to a plain zero on screen. \p{Cf} covers the direction marks,
+     * the zero-width joiners and a stray byte-order mark alike; nothing in it
+     * is ever part of an answer.
+     */
+    public static function clean(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        return trim(preg_replace('/\p{Cf}/u', '', $value) ?? $value);
+    }
+
+    /**
+     * One rejected cell, rendered for a message.
+     *
+     * Booleans and arrays reach here too - a sheet storing real Excel booleans
+     * hands PHP a bool, and (string) false is the empty string, which would
+     * print a message naming no value at all.
+     */
+    public static function describe(mixed $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? 'TRUE' : 'FALSE';
+        }
+
+        if ($value === null) {
+            return '';
+        }
+
+        return is_scalar($value) ? trim((string) $value) : '—';
+    }
+
+    /**
      * Everything a file may legitimately write in this column: the Select's
      * own labels plus the spellings the module accepts as aliases of them.
      *
@@ -347,6 +457,50 @@ final class ImportSchema
 
     private function castDate(string $field, mixed $value): array
     {
+        // A date cell that states no date, before anything tries to read one
+        // out of it. This is shared by every module on purpose: the shapes a
+        // sheet writes for "there is no date here" are the same whichever
+        // module it belongs to, and each of them used to end badly. A lone
+        // dash was refused, taking an otherwise valid row with it; a
+        // non-breaking space survived trim() and was handed to Carbon, which
+        // read it as today and stored today's date silently; a zero - the
+        // serial Excel leaves in a date column that was never filled in - was
+        // read as the 1st of January 1970, just as silently.
+        //
+        // The column is simply left empty. Whether that is allowed is the
+        // required-field rule's decision, exactly as it is for a cell that was
+        // genuinely left blank.
+        if ($this->statesNoDate($value)) {
+            return ['ok' => true, 'value' => null];
+        }
+
+        // A backslash where a date wants a slash. The sheets carry "06\17\2026"
+        // beside "06/30/2026" in the very same column - one keyboard away from
+        // each other, and one of the two unreadable to Carbon. A backslash
+        // separates nothing else in a date, so turning it into the separator it
+        // was meant to be cannot change how any real date reads.
+        if (is_string($value)) {
+            $value = str_replace('\\', '/', $value);
+        }
+
+        // A month name separated by slashes - "Jul/13/2026", which one team
+        // types throughout. Carbon reads "Jul 13 2026" and refuses the very
+        // same date written with slashes, so the separator is swapped for the
+        // space it wants. The month name is what makes this safe: it says which
+        // part is the month, so no reading of the date can change. A purely
+        // numeric "06/30/2026" carries no such marker and is left alone.
+        if (is_string($value) && preg_match('/\p{L}/u', $value) === 1 && str_contains($value, '/')) {
+            $value = str_replace('/', ' ', $value);
+        }
+
+        // A date written out with an Arabic month name - "21 يونيو 2026".
+        // Carbon knows the English month names and nothing else, so a sheet
+        // filled in Arabic had every one of these refused. The month name is
+        // read here and the cell rebuilt in a form Carbon cannot misread.
+        if (is_string($value) && preg_match('/\p{Arabic}/u', $value) === 1) {
+            $value = $this->readArabicMonth($value) ?? $value;
+        }
+
         // A module may read its own hand-typed date cells first. Excel serials
         // never reach it: the branch below already turns those into dates
         // correctly, and there is nothing ambiguous about a number.
@@ -374,6 +528,139 @@ final class ImportSchema
                 'message' => __('fields.import_invalid_date', ['field' => __('fields.' . $field)]),
             ];
         }
+    }
+
+    /**
+     * A date whose month is written as an Arabic word, as "Y-m-d".
+     *
+     * Both naming systems are accepted: the Levantine names a Gaza sheet is as
+     * likely to use as not - كانون الثاني, آذار, تشرين الأول - and the
+     * transliterated ones - يناير, مارس, أكتوبر. Day-first and month-first are
+     * both read, because the month name says which number is which and leaves
+     * nothing to guess at.
+     *
+     * Returns null when the cell is not a date of this shape, so the ordinary
+     * rules still decide what becomes of it.
+     */
+    private function readArabicMonth(string $value): ?string
+    {
+        static $months = null;
+
+        $months ??= [
+            1 => ['يناير', 'كانون الثاني', 'كانون ثاني'],
+            2 => ['فبراير', 'شباط'],
+            3 => ['مارس', 'آذار'],
+            4 => ['أبريل', 'ابريل', 'نيسان'],
+            5 => ['مايو', 'أيار'],
+            6 => ['يونيو', 'يونية', 'حزيران'],
+            7 => ['يوليو', 'يولية', 'تموز'],
+            8 => ['أغسطس', 'اغسطس', 'آب'],
+            9 => ['سبتمبر', 'أيلول'],
+            10 => ['أكتوبر', 'اكتوبر', 'تشرين الأول', 'تشرين اول'],
+            11 => ['نوفمبر', 'تشرين الثاني', 'تشرين ثاني'],
+            12 => ['ديسمبر', 'كانون الأول', 'كانون اول'],
+        ];
+
+        $needle = $this->normalise($value);
+
+        foreach ($months as $number => $names) {
+            foreach ($names as $name) {
+                $word = $this->normalise($name);
+
+                if (! str_contains($needle, $word)) {
+                    continue;
+                }
+
+                // Whatever is left once the month is taken out: a day and a
+                // year, in either order.
+                $rest = trim(str_replace($word, ' ', $needle));
+
+                if (preg_match('/^(\d{1,2})\D+(\d{4})$/u', $rest, $m) === 1) {
+                    return sprintf('%04d-%02d-%02d', (int) $m[2], $number, (int) $m[1]);
+                }
+
+                if (preg_match('/^(\d{4})\D+(\d{1,2})$/u', $rest, $m) === 1) {
+                    return sprintf('%04d-%02d-%02d', (int) $m[1], $number, (int) $m[2]);
+                }
+
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether a cell says nothing at all.
+     *
+     * True for a cell that is empty once every kind of blank is removed, and
+     * for one holding only punctuation used as a placeholder - "-", "--", "/".
+     * PHP's trim() stops at the ASCII space, so a non-breaking space, a
+     * zero-width joiner or a stray BOM used to survive it and be read as a
+     * value; \p{Z} and \p{C} cover all three.
+     *
+     * A cell carrying any letter or digit is never a placeholder, so a real
+     * answer can never be discarded here.
+     */
+    private function isPlaceholder(mixed $value): bool
+    {
+        if (! is_string($value)) {
+            return false;
+        }
+
+        $stripped = preg_replace('/[\p{Z}\p{C}]/u', '', $value) ?? $value;
+
+        return $stripped === '' || preg_match('/[\p{L}\p{N}]/u', $stripped) !== 1;
+    }
+
+    /**
+     * Whether a date cell states that there is no date.
+     *
+     * Beyond the blank and placeholder shapes isPlaceholder() covers, two
+     * spellings of "none" are specific to date columns:
+     *
+     *   - a serial of zero or less. Excel counts days from serial 1, so a zero
+     *     is not the 30th of December 1899, it is a date column nobody filled
+     *     in;
+     *   - a cell whose digits are all zeros - "0", "00/00/0000", "0000-00-00" -
+     *     which is what a form or an export writes for an absent date;
+     *   - a boolean FALSE, which is how a sheet storing real Excel booleans
+     *     leaves a date column unanswered.
+     *
+     * Anything holding a non-zero digit is left alone and still has to parse,
+     * so a real date can never be dropped here.
+     */
+    private function statesNoDate(mixed $value): bool
+    {
+        if ($this->isPlaceholder($value)) {
+            return true;
+        }
+
+        // A date column whose cells arrived as Excel booleans. FALSE is that
+        // sheet's way of writing "no date", and it used to reach Carbon as the
+        // empty string - which Carbon reads as today, so the row imported with
+        // today's date and said nothing. TRUE is not a date under any reading
+        // and is left to be refused below.
+        if ($value === false) {
+            return true;
+        }
+
+        if (is_numeric($value)) {
+            return (float) $value <= 0;
+        }
+
+        if (! is_string($value)) {
+            return false;
+        }
+
+        // A month name makes the cell a date attempt, not a "none" marker.
+        if (preg_match('/\p{L}/u', $value) === 1) {
+            return false;
+        }
+
+        $digits = preg_replace('/\D/u', '', $value) ?? '';
+
+        return $digits !== '' && trim($digits, '0') === '';
     }
 
     // ---------------------------------------------------------------------
@@ -572,6 +859,7 @@ final class ImportSchema
     private function normalise(?string $value): string
     {
         $value = trim((string) $value);
+        $value = preg_replace('/\p{Cf}/u', '', $value) ?? $value;
         $value = preg_replace('/[\x{0640}\x{064B}-\x{0652}]/u', '', $value) ?? $value;
         $value = strtr($value, ['أ' => 'ا', 'إ' => 'ا', 'آ' => 'ا', 'ى' => 'ي', 'ة' => 'ه']);
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;

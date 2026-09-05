@@ -11,7 +11,7 @@ class GroupSessionExport extends AbstractTableExport
 
     public function booleanFields(): array
     {
-        return ['is_pwd', 'has_gsfsh', 'receives_supplementary'];
+        return ['is_pwd', 'has_gsfsh'];
     }
 
     public function enumFields(): array

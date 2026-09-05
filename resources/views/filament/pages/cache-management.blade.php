@@ -18,6 +18,46 @@
     @endphp
 
     <div class="fi-page-content space-y-6">
+        {{-- ============ Build Section ============ --}}
+        <x-filament::section icon="heroicon-o-rocket-launch" icon-color="success">
+            <x-slot name="heading">
+                {{ __('ui.cache.build_heading') }}
+            </x-slot>
+
+            <x-slot name="description">
+                {{ __('ui.cache.build_description') }}
+            </x-slot>
+
+            <x-slot name="afterHeader">
+                <x-filament::button
+                    tag="button"
+                    size="sm"
+                    color="success"
+                    icon="heroicon-o-rocket-launch"
+                    :x-on:click="$confirmJs([
+                        'title' => __('ui.cache.build_confirm.title'),
+                        'text' => __('ui.cache.build_confirm.text'),
+                        'icon' => 'question',
+                        'confirmText' => __('ui.cache.build_confirm.confirm'),
+                    ], 'buildAll')"
+                >
+                    {{ __('ui.cache.build_now') }}
+                </x-filament::button>
+            </x-slot>
+
+            <ul class="ael-cache-build">
+                @foreach ($this->buildTypes() as $type)
+                    <li>
+                        <x-filament::icon :icon="$type['icon']" />
+                        <span>
+                            <strong>{{ $type['label'] }}</strong>
+                            {{ $type['description'] }}
+                        </span>
+                    </li>
+                @endforeach
+            </ul>
+        </x-filament::section>
+
         {{-- ============ Clear All Section ============ --}}
         <x-filament::section icon="heroicon-o-bolt" icon-color="danger">
             <x-slot name="heading">

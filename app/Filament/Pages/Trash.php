@@ -8,8 +8,11 @@ use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\MotherToMotherSession;
 use App\Models\PregnantLactatingWoman;
+use Carbon\Carbon;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -128,28 +131,161 @@ class Trash extends Page
 
     /**
      * Build the unified, paginated list of soft-deleted records across modules.
+     *
+     * The database does the sorting and the paging, not PHP. The previous
+     * version read every trashed row of all six modules into memory on every
+     * page view - `select * from children where deleted_at is not null`, with
+     * no limit, six times - then sorted the lot and sliced twenty-five rows out
+     * of it. The query count stayed flat, which is why nothing looked wrong,
+     * but the work behind each query grew with the size of the trash: at fifty
+     * thousand deleted records the page hydrated fifty thousand Eloquent models
+     * and built an `IN` clause with fifty thousand ids in it, to show twenty
+     * five rows.
+     *
+     * Now a UNION over the six tables - each contributing only a module tag, a
+     * key and a timestamp - is ordered and paged by the database, using the
+     * `deleted_at` index each table already has. Only the keys on the page are
+     * then read back as models. Everything here is constant work, whatever the
+     * trash holds.
      */
     public function getRows(): LengthAwarePaginator
     {
-        $rows = collect();
+        $summary = $this->summarise();
+
+        $this->summary = $summary;
+
+        $page = $this->getPage();
+        $keys = $this->keysOnPage($page);
+
+        return new LengthAwarePaginator(
+            $this->recordsFor($keys),
+            $summary['total'],
+            $this->perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
+    /**
+     * The trash as one list of (module, key, deleted_at), before paging.
+     *
+     * Deliberately not a list of records: the point is that this can be
+     * ordered and sliced by the database without reading a single row of
+     * anybody's data.
+     */
+    protected function indexQuery(): Builder
+    {
+        $union = null;
 
         foreach (static::modules() as $type => $config) {
             /** @var class-string<Model> $model */
             $model = $config['model'];
+            $table = (new $model)->getTable();
 
-            $records = $model::onlyTrashed()
-                ->orderByDesc('deleted_at')
-                ->get();
+            // $type is a key of this class's own registry - never user input -
+            // so it is safe to inline, and inlining keeps the binding order of
+            // the UNION straightforward.
+            $part = DB::table($table)
+                ->selectRaw("'" . $type . "' as module_type, id, deleted_at")
+                ->whereNotNull('deleted_at');
 
-            if ($records->isEmpty()) {
+            $union = $union === null ? $part : $union->unionAll($part);
+        }
+
+        return $union;
+    }
+
+    /**
+     * Totals for the header cards, in one grouped query over the index.
+     *
+     * @return array{total: int, modules: int, latest: string|null}
+     */
+    protected function summarise(): array
+    {
+        $groups = DB::query()
+            ->fromSub($this->indexQuery(), 'trash')
+            ->selectRaw('module_type, count(*) as total, max(deleted_at) as latest')
+            ->groupBy('module_type')
+            ->get();
+
+        $latest = $groups->pluck('latest')->filter()->max();
+
+        return [
+            'total' => (int) $groups->sum('total'),
+            'modules' => $groups->count(),
+            'latest' => $latest ? Carbon::parse($latest)->format('Y-m-d H:i') : null,
+        ];
+    }
+
+    /**
+     * The (module, key) pairs on one page, newest deletion first.
+     *
+     * The module and key tie-breakers keep the order stable: without them two
+     * records deleted in the same second could swap places between page one
+     * and page two and one of them would never be shown.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    protected function keysOnPage(int $page): Collection
+    {
+        return DB::query()
+            ->fromSub($this->indexQuery(), 'trash')
+            ->orderByDesc('deleted_at')
+            ->orderBy('module_type')
+            ->orderByDesc('id')
+            ->forPage($page, $this->perPage)
+            ->get();
+    }
+
+    /**
+     * Read the records for one page of keys, one query per module present.
+     *
+     * Not called hydrate(): that is a Livewire lifecycle hook, and Livewire
+     * calls it with no arguments on every request.
+     *
+     * @param  \Illuminate\Support\Collection<int, object>  $keys
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    protected function recordsFor(Collection $keys): Collection
+    {
+        $records = [];
+        $deleters = [];
+
+        foreach ($keys->groupBy('module_type') as $type => $entries) {
+            $config = static::modules()[$type] ?? null;
+
+            if (! $config) {
                 continue;
             }
 
-            $deleters = $this->resolveDeleters($model, $records->pluck('id')->all());
+            /** @var class-string<Model> $model */
+            $model = $config['model'];
+            $ids = $entries->pluck('id')->all();
 
-            foreach ($records as $record) {
-                $rows->push([
-                    'type' => $type,
+            foreach ($model::onlyTrashed()->whereIn('id', $ids)->get() as $record) {
+                $records[$type . ':' . $record->getKey()] = $record;
+            }
+
+            foreach ($this->resolveDeleters($model, $ids) as $id => $name) {
+                $deleters[$type . ':' . $id] = $name;
+            }
+        }
+
+        return $keys
+            ->map(function (object $entry) use ($records, $deleters): ?array {
+                $key = $entry->module_type . ':' . $entry->id;
+                $record = $records[$key] ?? null;
+
+                // Force-deleted between the index query and this one. Skipping
+                // it is right: it is not in the trash any more.
+                if (! $record) {
+                    return null;
+                }
+
+                $config = static::modules()[$entry->module_type];
+
+                return [
+                    'type' => $entry->module_type,
                     'module' => $config['label'],
                     'icon' => $config['icon'],
                     'color' => $config['color'],
@@ -157,34 +293,11 @@ class Trash extends Page
                     'name' => ($config['name'])($record),
                     'identifier' => ($config['identifier'])($record),
                     'deleted_at' => $record->deleted_at,
-                    'deleted_by' => $deleters[$record->getKey()] ?? null,
-                ]);
-            }
-        }
-
-        $sorted = $rows
-            ->sortByDesc(fn (array $row) => optional($row['deleted_at'])->timestamp ?? 0)
+                    'deleted_by' => $deleters[$key] ?? null,
+                ];
+            })
+            ->filter()
             ->values();
-
-        // The header cards describe the whole trash, not the page being looked
-        // at, so they are taken here where the full collection is still in
-        // hand instead of costing a second pass over every module.
-        $this->summary = [
-            'total' => $sorted->count(),
-            'modules' => $sorted->pluck('module')->unique()->count(),
-            'latest' => optional($sorted->first()['deleted_at'] ?? null)?->format('Y-m-d H:i'),
-        ];
-
-        $page = $this->getPage();
-        $items = $sorted->forPage($page, $this->perPage)->values();
-
-        return new LengthAwarePaginator(
-            $items,
-            $sorted->count(),
-            $this->perPage,
-            $page,
-            ['path' => LengthAwarePaginator::resolveCurrentPath()]
-        );
     }
 
     /**

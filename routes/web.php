@@ -1,41 +1,26 @@
 <?php
 
+use App\Http\Controllers\SessionKeepAliveController;
+use App\Http\Controllers\SwitchLocaleController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return auth()->check() ? redirect('/admin') : redirect('/admin/login');
-});
-
-/**
- * Keeps an open form's session alive.
+/*
+ * Every route here points at a controller rather than a closure.
  *
- * The data-entry forms in this system are long - the Children form alone has
- * sixty-eight fields across four tabs - and are routinely left open while the
- * screener goes and finds a missing answer. Laravel's session expires after
- * SESSION_LIFETIME minutes of no requests, and the next Livewire round trip
- * then comes back 419: "This page has expired", losing everything typed.
+ * That is not a style preference: `php artisan route:cache` refuses to
+ * serialise a closure, so a single one anywhere in this file makes the whole
+ * route table uncacheable and every request re-registers all of it. The panel
+ * is deployed by unpacking a zip on a host with no terminal, so the caches are
+ * built from the Cache Management page - and there is no point offering a
+ * button that cannot work.
  *
- * The panel pings this while a tab is open and visible. Touching the session
- * is the whole job - the web middleware group reading it is what pushes the
- * expiry forward - so the response is deliberately empty.
- *
- * Deliberately not behind `auth`: it reads nothing and returns nothing, and the
- * auth middleware would answer an already-expired session with a redirect to a
- * route name this application does not define, turning the very case this
- * exists for into a 500.
- *
- * @see resources/views/filament/scripts/dashboard-alerts.blade.php
+ * @see \App\Filament\Pages\CacheManagement
  */
-Route::get('/session/keep-alive', function () {
-    return response()->noContent();
-})->name('session.keep-alive');
 
-Route::get('/locale/{locale}', function (string $locale) {
-    $locale = in_array($locale, ['en', 'ar'], true)
-        ? $locale
-        : config('app.locale');
+Route::redirect('/', '/admin')->name('home');
 
-    session(['locale' => $locale]);
+Route::get('/session/keep-alive', SessionKeepAliveController::class)
+    ->name('session.keep-alive');
 
-    return back();
-})->name('locale.switch');
+Route::get('/locale/{locale}', SwitchLocaleController::class)
+    ->name('locale.switch');

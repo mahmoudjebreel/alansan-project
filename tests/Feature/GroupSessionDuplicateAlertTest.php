@@ -114,7 +114,7 @@ class GroupSessionDuplicateAlertTest extends TestCase
             'marital_status' => 'married',
             'phone_number' => '0599123456',
             'has_gsfsh' => false,
-            'receives_supplementary' => false,
+            'receives_supplementary' => null,
         ], $data);
 
         // The session's own columns are never carried over.

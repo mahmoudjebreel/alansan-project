@@ -348,6 +348,23 @@ return [
         'permission_still_cached' => 'The permission cache is still there after the attempt to clear it.',
         'permission_clear_failed' => 'The roles and permissions cache could not be cleared.',
         'separator' => ', ',
+        'build_heading' => 'Build the caches (speed the panel up)',
+        'build_description' => 'Prepares the config, the routes and the Blade templates in advance instead of reading them on every request. Run it once after each upload to the server.',
+        'build_now' => 'Build the caches',
+        'build_confirm' => [
+            'title' => 'Build the caches',
+            'text' => 'The config, the routes and the Blade templates will be prepared in advance. This makes the panel noticeably faster. Remember to run it again after changing any project file or the .env.',
+            'confirm' => 'Yes, build them',
+            'success' => 'The caches were built',
+            'error' => 'The caches could not be built',
+        ],
+        'build_config' => ['label' => 'Config cache', 'description' => 'Folds the config files into one instead of reading all of them on every request.'],
+        'build_route' => ['label' => 'Route cache', 'description' => 'Prepares the route table instead of registering it again on every request.'],
+        'build_view' => ['label' => 'View cache', 'description' => 'Compiles the Blade templates ahead of time, so the first visit to a page does not pay for it.'],
+        'build_all_title' => 'The caches were built',
+        'build_all_body' => 'Built: :list.',
+        'build_failed_title' => 'The caches could not be built',
+        'build_failed_body' => 'Building :label failed, and everything built so far was discarded so the panel keeps working. Details: :message',
     ],
 
     'backups' => [

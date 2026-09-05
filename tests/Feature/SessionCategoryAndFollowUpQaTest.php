@@ -52,7 +52,7 @@ class SessionCategoryAndFollowUpQaTest extends TestCase
             'phone_number' => '0599123456',
             'is_pwd' => false,
             'has_gsfsh' => false,
-            'receives_supplementary' => false,
+            'receives_supplementary' => null,
         ], $overrides);
     }
 

@@ -19,11 +19,17 @@ use Maatwebsite\Excel\Concerns\WithChunkReading;
  */
 abstract class AbstractTableImport implements ToCollection, WithChunkReading
 {
+    /** Locales a template may have been downloaded in. */
+    private const LOCALES = ['ar', 'en'];
+
     /** Resolved heading per column index. */
     private array $columnMap = [];
 
     /** Fields found in the uploaded heading row. */
     private array $seenFields = [];
+
+    /** Headings the file carries that this module could not place. */
+    private array $unknownHeadings = [];
 
     private bool $headingsRead = false;
 
@@ -108,7 +114,21 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
             $resolved = $this->schema->resolveHeading(is_scalar($heading) ? (string) $heading : null);
 
             if ($resolved === null) {
-                continue; // Unknown extra columns are ignored, not fatal.
+                // An unplaceable column is not read, and that on its own is
+                // right: a file may carry notes and working columns the module
+                // knows nothing about. What was wrong was staying silent about
+                // it. A heading typed over by accident - "Date Session Subject"
+                // where the template wrote "Session Date" - failed the upload
+                // as a *missing* column, which is true and useless: the column
+                // is right there in the file, one word out. Remembering it lets
+                // the message name it.
+                $heading = trim((string) (is_scalar($heading) ? $heading : ''));
+
+                if ($heading !== '' && ! in_array($heading, $this->unknownHeadings, true)) {
+                    $this->unknownHeadings[] = $heading;
+                }
+
+                continue;
             }
 
             // A session past the maximum is a structural problem with the file,
@@ -144,6 +164,16 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
         return array_values(array_diff($this->schema->requiredFields(), $this->seenFields));
     }
 
+    /**
+     * Headings present in the file that this module could not place.
+     *
+     * @return array<string>
+     */
+    public function unknownHeadings(): array
+    {
+        return $this->unknownHeadings;
+    }
+
     public function hasHeadings(): bool
     {
         return $this->headingsRead && $this->columnMap !== [];
@@ -169,9 +199,11 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
         foreach ($this->columnMap as $index => $column) {
             $value = $row[$index] ?? null;
 
-            if (is_string($value)) {
-                $value = trim($value);
-            }
+            // Direction marks and zero-width joiners are stripped here as well
+            // as in castValue(), so the repeater columns below - which go
+            // straight to the date and number readers - see the same cell the
+            // flat columns do.
+            $value = ImportSchema::clean($value);
 
             if ($column['type'] === 'field') {
                 $cast = $this->schema->castValue($column['field'], $value);
@@ -302,7 +334,10 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
 
             if ($cast === 'integer' || $cast === 'int' || str_starts_with((string) $cast, 'decimal:')) {
                 if (! is_numeric($value)) {
-                    $messages[] = __('fields.import_invalid_number', ['field' => __('fields.' . $field)]);
+                    $messages[] = __('fields.import_invalid_number', [
+                        'value' => ImportSchema::describe($value),
+                        'field' => __('fields.' . $field),
+                    ]);
                 }
             }
         }
@@ -329,7 +364,10 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
     private function parseNumber(mixed $value, string $label, array &$messages): mixed
     {
         if (! is_numeric($value)) {
-            $messages[] = __('fields.import_invalid_number', ['field' => $label]);
+            $messages[] = __('fields.import_invalid_number', [
+                'value' => ImportSchema::describe($value),
+                'field' => $label,
+            ]);
 
             return null;
         }
@@ -356,24 +394,46 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
     {
         static $guidance = null;
 
-        $guidance ??= collect((new ImportTemplateExport($this->definition))->array()[0] ?? [])
-            ->map(fn ($value): string => trim((string) $value))
+        // The row is written in whatever language the template was downloaded
+        // in, which is not necessarily the language of the session uploading it
+        // - a template downloaded in English and uploaded from an Arabic panel
+        // was compared against the Arabic hints, matched none of them, and was
+        // read as a data row, so the file failed on its own instruction line.
+        // Both languages are built here for the same reason the headings are
+        // resolved in both.
+        $guidance ??= collect(self::LOCALES)
+            ->map(function (string $locale): array {
+                $original = app()->getLocale();
+                app()->setLocale($locale);
+
+                try {
+                    $row = (new ImportTemplateExport($this->definition))->array()[0] ?? [];
+                } finally {
+                    app()->setLocale($original);
+                }
+
+                return collect($row)->map(fn ($value): string => trim((string) $value))->all();
+            })
             ->all();
 
         $actual = collect($row)->map(fn ($value): string => trim((string) $value))->all();
 
-        $guidanceFilled = array_filter($guidance, fn ($v) => $v !== '');
+        foreach ($guidance as $candidate) {
+            $filled = array_filter($candidate, fn ($v) => $v !== '');
 
-        if ($guidanceFilled === []) {
-            return false;
-        }
-
-        foreach ($guidanceFilled as $index => $value) {
-            if (($actual[$index] ?? null) !== $value) {
-                return false;
+            if ($filled === []) {
+                continue;
             }
+
+            foreach ($filled as $index => $value) {
+                if (($actual[$index] ?? null) !== $value) {
+                    continue 2;
+                }
+            }
+
+            return true;
         }
 
-        return true;
+        return false;
     }
 }

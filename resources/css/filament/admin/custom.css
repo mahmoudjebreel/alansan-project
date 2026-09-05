@@ -401,3 +401,40 @@ input[type="number"] {
     margin-bottom: 0.75rem;
     object-fit: contain;
 }
+
+/* Cache management: the list of what "build the caches" actually builds.
+   Plain CSS, like the trash page and for the same reason - this panel is
+   served Filament's precompiled stylesheet and has no Tailwind build. */
+.ael-cache-build {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ael-cache-build li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: rgb(var(--gray-500));
+}
+
+.ael-cache-build li svg {
+    flex: none;
+    width: 1.125rem;
+    height: 1.125rem;
+    margin-top: 0.125rem;
+    color: rgb(var(--gray-400));
+}
+
+.ael-cache-build strong {
+    color: rgb(var(--gray-950));
+}
+
+.dark .ael-cache-build strong {
+    color: rgb(var(--gray-50));
+}

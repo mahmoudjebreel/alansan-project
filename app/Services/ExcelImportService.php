@@ -38,12 +38,24 @@ final class ExcelImportService
         $missing = $importer->missingRequiredColumns();
 
         if ($missing !== []) {
-            return [
-                'imported' => 0,
-                'errors' => [__('fields.import_missing_columns', [
-                    'columns' => collect($missing)->map(fn (string $f): string => __('fields.' . $f))->implode('، '),
-                ])],
-            ];
+            $errors = [__('fields.import_missing_columns', [
+                'columns' => collect($missing)->map(fn (string $f): string => __('fields.' . $f))->implode('، '),
+            ])];
+
+            // Naming a column as missing is only half an answer when the column
+            // is in the file under a heading nobody recognised. Listing what
+            // was not understood alongside it turns "Session Date is missing"
+            // into something the uploader can act on, because the mistyped
+            // heading is sitting right there in the same message.
+            $unknown = $importer->unknownHeadings();
+
+            if ($unknown !== []) {
+                $errors[] = __('fields.import_unknown_columns', [
+                    'columns' => collect($unknown)->implode('، '),
+                ]);
+            }
+
+            return ['imported' => 0, 'errors' => $errors];
         }
 
         $errors = $importer->errors();

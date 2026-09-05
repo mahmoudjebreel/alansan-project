@@ -34,7 +34,8 @@ class GroupSessionFactory extends Factory
             'marital_status' => 'married',
             'phone_number' => '0599123456',
             'has_gsfsh' => false,
-            'receives_supplementary' => false,
+            // The commodity handed out, or nothing at all - not a yes/no.
+            'receives_supplementary' => null,
         ];
     }
 }

@@ -10,6 +10,7 @@ use App\Exports\IndividualCounselingExport;
 use App\Exports\MotherToMotherExport;
 use App\Exports\PregnantWomenExport;
 use App\Models\Child;
+use App\Support\Import\ChildImportDates;
 use App\Support\Import\ImportedRowDeriver;
 use App\Support\Import\PregnantWomanImportDates;
 use App\Support\Import\PregnantWomanImportSynonyms;
@@ -42,6 +43,18 @@ final class ImportDefinition
      *                                   field => [accepted input => stored value].
      *                                   Matched after the option list itself, so a
      *                                   synonym can never shadow a real option.
+     * @param  array<string, array<string>>  $headingAliases  Column headings a real
+     *                                   file carries that the export does not write,
+     *                                   as field => [accepted heading, ...]. The
+     *                                   teams fill in a form of their own whose
+     *                                   columns are named "Date of session" and
+     *                                   "Sesion subject", and a heading the importer
+     *                                   cannot place is not merely unread - the
+     *                                   column is dropped in silence, and the upload
+     *                                   fails on the one dropped column the database
+     *                                   will not do without. Matched after the
+     *                                   canonical headings, so an alias can never
+     *                                   shadow a real column name.
      * @param  array<string>  $collapseWhitespace  Free-text fields whose inner runs
      *                                   of spaces are squeezed to one before the
      *                                   value is stored, so "mixed  feeding" and
@@ -73,6 +86,7 @@ final class ImportDefinition
         public readonly string $filename,
         public readonly array $computed = [],
         public readonly array $synonyms = [],
+        public readonly array $headingAliases = [],
         public readonly array $collapseWhitespace = [],
         public readonly ?string $dateReader = null,
         public readonly mixed $deriver = null,
@@ -129,8 +143,9 @@ final class ImportDefinition
                 //
                 // Boolean columns are deliberately absent: castBoolean() runs
                 // before the option matching and already reads نعم/لا, Yes/No,
-                // Y/N, true/false and 1/0, so entries here would never be
-                // consulted. @see \App\Support\ImportSchema::castValue()
+                // Y/N, true/false, 1/0 and a real Excel boolean cell, so
+                // entries here would never be consulted.
+                // @see \App\Support\ImportSchema::castValue()
                 synonyms: [
                     'visit_type' => [
                         'جديد' => 'new',
@@ -213,31 +228,55 @@ final class ImportDefinition
                         'Separated' => 'منفصلة',
                     ],
 
+                    // Written out in every spelling the files actually use.
+                    // Normalising unifies the alef and ya forms and squeezes
+                    // whitespace, but it does not remove brackets or the
+                    // definite article - so "وكالة (أونروا)" matching told us
+                    // nothing about "وكالة أونروا", which is what the sheets
+                    // are mostly written in and which was being refused.
                     'income_source' => [
                         'حكومي' => 'government',
+                        'حكومية' => 'government',
                         'حكومة' => 'government',
+                        'الحكومة' => 'government',
                         'Government' => 'government',
                         'Governmental' => 'government',
+                        'Govt' => 'government',
 
                         'وكالة (أونروا)' => 'unrwa',
+                        'وكالة أونروا' => 'unrwa',
+                        'وكالة الغوث' => 'unrwa',
                         'وكالة' => 'unrwa',
+                        'الوكالة' => 'unrwa',
                         'أونروا' => 'unrwa',
                         'الأونروا' => 'unrwa',
                         'UNRWA' => 'unrwa',
+                        'UNRWA Agency' => 'unrwa',
+                        'Agency' => 'unrwa',
 
                         'أخرى' => 'other',
+                        'غير ذلك' => 'other',
                         'Other' => 'other',
+                        'Others' => 'other',
                     ],
 
                     'disability_cause' => [
                         'الحرب' => 'war',
                         'حرب' => 'war',
+                        'إصابة حرب' => 'war',
                         'War' => 'war',
+                        'War Injury' => 'war',
 
                         'أخرى' => 'other',
+                        'غير ذلك' => 'other',
                         'Other' => 'other',
+                        'Others' => 'other',
                     ],
                 ],
+                // These workbooks carry hand-typed dates too, and Carbon reads
+                // a slashed one month-first: "31/12/1990" was refused outright
+                // and "7/12/95" imported as the 12th of July without a word.
+                dateReader: ChildImportDates::class,
                 // Visit type and age are decided by the system on the form, so
                 // an uploaded file must not be able to state them either.
                 deriver: [ImportedRowDeriver::class, 'children'],
@@ -364,6 +403,14 @@ final class ImportDefinition
                         'مخيم القوقا' => 'el_qoqa',
                         'El Qoqa' => 'el_qoqa',
                         'Al Qoqa' => 'el_qoqa',
+
+                        // The fifth shelter. Individual Counseling has offered
+                        // it all along; Group Sessions only got it once a
+                        // camp's worth of sessions was refused for naming it.
+                        'الحلو' => 'al_helou',
+                        'مخيم الحلو' => 'al_helou',
+                        'Al Helou' => 'al_helou',
+                        'El Helou' => 'al_helou',
                     ],
 
                     'category' => [
@@ -386,6 +433,9 @@ final class ImportDefinition
                         'مقدم رعاية أقل من 6 أشهر' => 'caregiver_child_under_6_months',
                         'Caregiver with Child <6 Months' => 'caregiver_child_under_6_months',
                         'Caregiver <6 Months' => 'caregiver_child_under_6_months',
+                        // The teams' own form says "infant" where the Select
+                        // says "child".
+                        'Caregiver with infant <6 months' => 'caregiver_child_under_6_months',
 
                         'مقدم رعاية لطفل 6-23 شهراً' => 'caregiver_child_6_23_months',
                         'مقدم رعاية 6-23 شهر' => 'caregiver_child_6_23_months',
@@ -396,6 +446,10 @@ final class ImportDefinition
                         'حوامل' => 'pregnant',
                         'Pregnant' => 'pregnant',
                         'Pregnant Women' => 'pregnant',
+                        // The column these sheets fill in is headed "P or L or
+                        // other", and P is the only one of the three the teams
+                        // actually write.
+                        'P' => 'pregnant',
                     ],
 
                     // This module's participants include men, so the masculine
@@ -419,6 +473,24 @@ final class ImportDefinition
                         'منفصل' => 'separated',
                         'Separated' => 'separated',
                     ],
+                ],
+                // The teams do not fill in the downloadable template: they
+                // fill in a form of their own, whose column names are the ones
+                // below - typos, casing and all. Every spelling here was read
+                // off a workbook that was actually submitted, and none of them
+                // is a guess. Matched after the real headings, so none of them
+                // can shadow a column the export itself writes.
+                headingAliases: [
+                    'session_date' => ['Date of session', 'Date of Session'],
+                    'session_group_number' => ['Sesion group number', 'Session group number'],
+                    'session_subject' => ['Sesion subject'],
+                    'id_number' => ['ID No', 'ID Number'],
+                    'full_name_ar' => ['Name in Arabic (4 Names)', 'Name in Arabic'],
+                    'visit_type' => ['New/Follow Up'],
+                    'category' => ['P or L or other'],
+                    'newborn_dob' => ['If L woman, DOB of Newborn', 'DOB of Newborn'],
+                    'is_pwd' => ['PwD'],
+                    'receives_supplementary' => ['Receive supplementary'],
                 ],
                 deriver: [ImportedRowDeriver::class, 'groupSessions'],
             ),
@@ -521,6 +593,9 @@ final class ImportDefinition
                         'مقدم رعاية أقل من 6 أشهر' => 'caregiver_child_under_6_months',
                         'Caregiver with Child <6 Months' => 'caregiver_child_under_6_months',
                         'Caregiver <6 Months' => 'caregiver_child_under_6_months',
+                        // The teams' own form says "infant" where the Select
+                        // says "child".
+                        'Caregiver with infant <6 months' => 'caregiver_child_under_6_months',
 
                         'مقدم رعاية لطفل 6-23 شهراً' => 'caregiver_child_6_23_months',
                         'مقدم رعاية 6-23 شهر' => 'caregiver_child_6_23_months',
@@ -531,6 +606,10 @@ final class ImportDefinition
                         'حوامل' => 'pregnant',
                         'Pregnant' => 'pregnant',
                         'Pregnant Women' => 'pregnant',
+                        // The column these sheets fill in is headed "P or L or
+                        // other", and P is the only one of the three the teams
+                        // actually write.
+                        'P' => 'pregnant',
                     ],
 
                     'marital_status' => [
@@ -552,6 +631,24 @@ final class ImportDefinition
                         'منفصل' => 'separated',
                         'Separated' => 'separated',
                     ],
+                ],
+                // The teams do not fill in the downloadable template: they
+                // fill in a form of their own, whose column names are the ones
+                // below - typos, casing and all. Every spelling here was read
+                // off a workbook that was actually submitted, and none of them
+                // is a guess. Matched after the real headings, so none of them
+                // can shadow a column the export itself writes.
+                headingAliases: [
+                    'session_date' => ['Date of session', 'Date of Session'],
+                    'session_group_number' => ['Sesion group number', 'Session group number'],
+                    'session_subject' => ['Sesion subject'],
+                    'id_number' => ['ID No', 'ID Number'],
+                    'full_name_ar' => ['Name in Arabic (4 Names)', 'Name in Arabic'],
+                    'visit_type' => ['New/Follow Up'],
+                    'category' => ['P or L or other'],
+                    'newborn_dob' => ['If L woman, DOB of Newborn', 'DOB of Newborn'],
+                    'is_pwd' => ['PwD'],
+                    'receives_supplementary' => ['Receive supplementary'],
                 ],
             ),
             new self(

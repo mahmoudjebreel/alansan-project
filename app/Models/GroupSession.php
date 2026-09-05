@@ -37,7 +37,6 @@ class GroupSession extends Model
         'newborn_dob' => 'date',
         'is_pwd' => 'boolean',
         'has_gsfsh' => 'boolean',
-        'receives_supplementary' => 'boolean',
     ];
 
     public function getActivitylogOptions(): LogOptions
