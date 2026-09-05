@@ -501,6 +501,28 @@ final class ImportSchema
             $value = $this->readArabicMonth($value) ?? $value;
         }
 
+        // A slashed date whose first number is past twelve. Carbon reads a
+        // slashed date month-first, so "14/12/1998" and "20/01/26" were refused
+        // as a fourteenth and a twentieth month - while "07/12/1998", typed by
+        // the same hand on the same day, imported quietly as the 12th of July.
+        // A number above twelve can only be a day, so this one shape can be
+        // read with certainty; anything genuinely ambiguous is left to the
+        // module's own reader, which is where that decision belongs.
+        if (is_string($value) && preg_match('#^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$#', $value, $m) === 1 && (int) $m[1] > 12) {
+            $day = (int) $m[1];
+            $month = (int) $m[2];
+            $year = mb_strlen($m[3]) === 2 ? 2000 + (int) $m[3] : (int) $m[3];
+
+            // Only a day that exists. "31/4/2025" is not the 31st of April
+            // written back to front, it is a date that never happened - and
+            // rebuilding it as 2025-04-31 would not refuse it, it would roll it
+            // silently into the 1st of May. Left as it is, the ordinary rule
+            // below still turns it down, which is the answer it deserves.
+            if (checkdate($month, $day, $year)) {
+                $value = sprintf('%04d-%02d-%02d', $year, $month, $day);
+            }
+        }
+
         // A module may read its own hand-typed date cells first. Excel serials
         // never reach it: the branch below already turns those into dates
         // correctly, and there is nothing ambiguous about a number.

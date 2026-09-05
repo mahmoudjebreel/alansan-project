@@ -771,6 +771,8 @@ final class ImportDefinition
                         'تغذية تكميلية' => 'complementary_feeding',
                         'Complementary feeding' => 'complementary_feeding',
                         'Complimentary Feeding' => 'complementary_feeding',
+                        // Fifty three rows of one team's file spell it this way.
+                        'Comlementary Feeding' => 'complementary_feeding',
                         'CF' => 'complementary_feeding',
 
                         'دعم الرضاعة الطبيعية' => 'bf_support',
@@ -822,6 +824,10 @@ final class ImportDefinition
                         'نعم' => 'yes',
                         'Yes' => 'yes',
                         'Y' => 'yes',
+                        // The answer written as the state itself: a column
+                        // headed "Pregnancy" answered "pregnant" is a yes.
+                        'pregnant' => 'yes',
+                        'حامل' => 'yes',
                         'True' => 'yes',
                         '1' => 'yes',
 
@@ -835,6 +841,12 @@ final class ImportDefinition
                         'نعم' => 'yes',
                         'Yes' => 'yes',
                         'Y' => 'yes',
+                        // As with pregnancy above: "lactated" under "Lactating"
+                        // is how these sheets say yes.
+                        'lactated' => 'yes',
+                        'lactating' => 'yes',
+                        'مرضع' => 'yes',
+                        'مرضعة' => 'yes',
                         'True' => 'yes',
                         '1' => 'yes',
 
@@ -866,6 +878,7 @@ final class ImportDefinition
                         'ebf' => 'Exclusive Breastfeeding',
                         'exclusive bf' => 'Exclusive Breastfeeding',
                         'exclusive breast feeding' => 'Exclusive Breastfeeding',
+                        'exclusively bf' => 'Exclusive Breastfeeding',
                         'breastfeeding' => 'Exclusive Breastfeeding',
                         'breast feeding' => 'Exclusive Breastfeeding',
                         'formula' => 'Formula Feeding',
