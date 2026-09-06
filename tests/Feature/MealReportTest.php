@@ -116,6 +116,12 @@ class MealReportTest extends TestCase
         $this->assertSame(MealReportLayout::sheets(), $names);
         $this->assertNotContains('KIT distribution', $names);
 
+        // The three sheets that are produced come out in the order the
+        // official workbook puts them in.
+        $template = IOFactory::load(base_path('tests/Fixtures/meal-report-template.xlsx'));
+
+        $this->assertSame($template->getSheetNames(), $names);
+
         @unlink($path);
     }
 
@@ -401,7 +407,12 @@ class MealReportTest extends TestCase
 
         Livewire::test(MealReport::class)
             ->assertSuccessful()
-            ->assertFormSet(['year' => now()->year, 'month' => now()->month, 'site' => null])
+            ->assertFormSet([
+                'year' => now()->year,
+                'from_month' => now()->month,
+                'to_month' => now()->month,
+                'site' => null,
+            ])
             ->assertSee(__('fields.meal_site_required'));
     }
 
@@ -430,7 +441,12 @@ class MealReportTest extends TestCase
         $this->actingAsRole('Admin');
 
         Livewire::test(MealReport::class)
-            ->fillForm(['year' => self::YEAR, 'month' => self::MONTH, 'site' => self::SITE])
+            ->fillForm([
+                'year' => self::YEAR,
+                'from_month' => self::MONTH,
+                'to_month' => self::MONTH,
+                'site' => self::SITE,
+            ])
             ->assertSee(__('fields.meal_preview'))
             ->assertSee(self::SITE)
             ->assertSee(__('fields.meal_sam_cases'));

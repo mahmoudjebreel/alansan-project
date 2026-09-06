@@ -397,7 +397,7 @@ return [
     ],
 
     'meal_report' => [
-        'title' => 'تقرير MEAL الشهري',
+        'title' => 'تقرير MEAL للرصد',
     ],
 
     'cache' => [

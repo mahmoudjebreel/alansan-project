@@ -387,7 +387,7 @@ return [
     ],
 
     'meal_report' => [
-        'title' => 'Monthly MEAL report',
+        'title' => 'MEAL Monitoring Report',
     ],
 
     'cache' => [

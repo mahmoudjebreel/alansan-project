@@ -300,7 +300,15 @@ class MealScreeningAggregationTest extends TestCase
         }
 
         $this->assertNotSame($july, $june, 'A different month must produce a different set of numbers.');
-        $this->assertSame([], $this->sheet(self::MONTH - 2, self::SITE)['rows'], 'An empty month has no day rows.');
+
+        // A month with no records still appears, as one all-zero row: the
+        // report is read as a sequence and a missing month would read as a
+        // month that was never asked for.
+        $empty = $this->sheet(self::MONTH - 2, self::SITE);
+
+        $this->assertCount(1, $empty['rows'], 'An empty month keeps its place in the report.');
+        $this->assertSame('', $empty['rows'][0]['day']);
+        $this->assertSame(0, $empty['rows'][0]['c6_23_new_mam_male']);
     }
 
     public function test_changing_the_site_filter_recomputes_every_cell(): void

@@ -18,6 +18,11 @@
             <x-slot name="heading">{{ __('fields.meal_preview') }}</x-slot>
             <x-slot name="description">
                 {{ $summary['site'] }} &mdash; {{ $summary['period'] }}
+                @if ($summary['months'] > 1)
+                    <x-filament::badge color="info" size="sm" class="ms-2 inline-flex">
+                        {{ trans_choice('fields.meal_months_in_file', $summary['months'], ['count' => $summary['months']]) }}
+                    </x-filament::badge>
+                @endif
             </x-slot>
 
             <div class="grid gap-4 md:grid-cols-3">
@@ -43,6 +48,28 @@
                     </div>
                 @endforeach
             </div>
+
+            @if (filled($summary['review']))
+                {{-- Screenings with no usable measurement. They are deliberately
+                     absent from every status column: an unmeasured child is not
+                     a Normal one. --}}
+                <div class="mt-4 rounded-xl bg-warning-50 p-4 ring-1 ring-warning-600/20 dark:bg-warning-500/10 dark:ring-warning-400/30">
+                    <h3 class="text-sm font-semibold text-warning-800 dark:text-warning-300">
+                        {{ __('fields.meal_review_heading') }}
+                    </h3>
+                    <p class="mt-1 text-xs text-warning-700 dark:text-warning-400">
+                        {{ __('fields.meal_review_hint') }}
+                    </p>
+                    <dl class="mt-3 space-y-2">
+                        @foreach ($summary['review'] as $key => $count)
+                            <div class="flex items-center justify-between gap-3 text-sm">
+                                <dt class="text-warning-700 dark:text-warning-400">{{ __('fields.meal_review_' . $key) }}</dt>
+                                <dd class="font-semibold tabular-nums text-warning-900 dark:text-warning-200">{{ number_format($count) }}</dd>
+                            </div>
+                        @endforeach
+                    </dl>
+                </div>
+            @endif
         </x-filament::section>
     @endunless
 

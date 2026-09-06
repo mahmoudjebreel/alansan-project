@@ -8,16 +8,16 @@ use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\PregnantLactatingWoman;
 use App\Support\MealReport\MealReportLayout;
+use App\Support\MealReport\ReportPeriod;
 use App\Support\MealReport\SiteVocabulary;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
 
 /**
- * Aggregates the MEAL monthly monitoring report straight out of the existing
- * module tables. Read-only: nothing here writes.
+ * Aggregates the MEAL monitoring report straight out of the existing module
+ * tables. Read-only: nothing here writes.
  *
- * Two rules shape how the queries are written:
+ * Four rules shape how the queries are written:
  *
  *  - Counting happens in the database. Each sheet is built from a handful of
  *    GROUP BY queries; no query hydrates a model or walks every record.
@@ -26,6 +26,13 @@ use Illuminate\Support\Collection;
  *    applied by the very helpers the rest of the system uses
  *    (Child::classifyMuac, PregnantLactatingWoman::classifyMuac). Change a
  *    threshold there and this report follows automatically.
+ *  - A report covers a ReportPeriod, not a single month. The period is read in
+ *    one pass per source - a BETWEEN over the whole window - and the rows are
+ *    bucketed to their own month afterwards, so reporting five months costs
+ *    the same number of queries as reporting one.
+ *  - Every sheet is filtered on its own date. Screening uses the reporting
+ *    date, IYCF the counselling or session date, CMAM the admission date for
+ *    admissions and the discharge date for discharges.
  *
  * Columns the template asks for that this system does not capture are returned
  * as null rather than 0, so a blank cell reads as "not measured" instead of
@@ -83,19 +90,39 @@ class MealReportService
     /**
      * Build every sheet for one month and site.
      *
-     * @return array<string, array{rows: array<int, array<string, int|float|string|null>>, totals: array<string, int|float|null>}>
+     * Kept as the single-month spelling of buildPeriod(): a one month report
+     * is simply a period whose two ends are the same month.
+     *
+     * @return array<string, array{rows: array, totals: array, monthStarts: array, review: array}>
      */
     public function build(int $year, int $month, ?string $site): array
     {
+        return $this->buildPeriod(ReportPeriod::month($year, $month), $site);
+    }
+
+    /**
+     * Build every sheet for a run of consecutive months and one site.
+     *
+     * Each month is counted strictly on its own - a record only ever lands in
+     * the bucket of the month its own date falls in - and the months are then
+     * laid out in calendar order inside the same sheet, which is exactly what
+     * the template's MONTH column is for.
+     *
+     * @return array<string, array{rows: array, totals: array, monthStarts: array, review: array}>
+     */
+    public function buildPeriod(ReportPeriod $period, ?string $site): array
+    {
+        [$screening, $review] = $this->screening($period, $site);
+
         return [
             MealReportLayout::SHEET_SCREENING => $this->finalise(
-                MealReportLayout::SHEET_SCREENING, $year, $month, $site, $this->screening($year, $month, $site),
+                MealReportLayout::SHEET_SCREENING, $period, $site, $screening, $review,
             ),
             MealReportLayout::SHEET_IYCF => $this->finalise(
-                MealReportLayout::SHEET_IYCF, $year, $month, $site, $this->iycf($year, $month, $site),
+                MealReportLayout::SHEET_IYCF, $period, $site, $this->iycf($period, $site),
             ),
             MealReportLayout::SHEET_CMAM => $this->finalise(
-                MealReportLayout::SHEET_CMAM, $year, $month, $site, $this->cmam($year, $month, $site),
+                MealReportLayout::SHEET_CMAM, $period, $site, $this->cmam($period, $site),
             ),
         ];
     }
@@ -105,25 +132,35 @@ class MealReportService
     // -----------------------------------------------------------------
 
     /**
-     * @return array<int, array<string, int>>
+     * @return array{0: array<int, array<int, array<string, int>>>, 1: array<string, int>}
      */
-    private function screening(int $year, int $month, ?string $site): array
+    private function screening(ReportPeriod $period, ?string $site): array
     {
-        $days = [];
+        $buckets = [];
+
+        // A screening that cannot be placed in a template cell is counted here
+        // instead of being dropped without trace. Inventing a status for an
+        // unmeasured child would file them under Normal, which is precisely
+        // the reading the programme must never make.
+        $review = ['children_missing_muac' => 0, 'children_missing_age' => 0, 'women_missing_muac' => 0];
 
         $children = Child::query()
-            ->whereYear('date_of_reporting', $year)
-            ->whereMonth('date_of_reporting', $month)
+            ->whereBetween('date_of_reporting', $period->dateRange())
             ->when($this->siteChosen($site), fn (Builder $q) => $q->where('type_of_site', SiteVocabulary::typeOfSite($site)))
             ->selectRaw('date_of_reporting, visit_type, sex, has_oedema, is_pwd, muac_mm, date_of_birth, age_months, COUNT(*) as aggregate_count')
             ->groupBy('date_of_reporting', 'visit_type', 'sex', 'has_oedema', 'is_pwd', 'muac_mm', 'date_of_birth', 'age_months')
             ->get();
 
         foreach ($children as $row) {
-            $day = Carbon::parse($row->date_of_reporting)->day;
+            $on = Carbon::parse($row->date_of_reporting);
             $count = (int) $row->aggregate_count;
             $sex = $row->sex === 'female' ? 'female' : 'male';
+
+            // Screening visit type, straight from the record. It says whether
+            // this was the child's first screening or a later one, and has
+            // nothing to do with any CMAM visit number.
             $visit = $row->visit_type === 'follow_up' ? 'fu' : 'new';
+
             $ageMonths = $this->monthsBetween($row->date_of_birth, $row->date_of_reporting) ?? $row->age_months;
 
             // Nutrition status comes from the shared classifier, never from a
@@ -133,45 +170,62 @@ class MealReportService
             $muacStatus = $this->slugStatus(Child::classifyMuac($row->muac_mm));
             $status = $row->has_oedema ? 'oedema' : $muacStatus;
 
-            if ($status === null || $ageMonths === null) {
+            if ($ageMonths === null) {
+                $review['children_missing_age'] += $count;
+
                 continue;
             }
 
-            $band = $this->childBand($ageMonths);
+            $band = $this->childBand((int) $ageMonths);
 
+            // Outside 6-59 months the child is not in this sheet's scope at
+            // all, which is not a data problem and so is not flagged.
             if ($band === null) {
+                continue;
+            }
+
+            // No oedema and no usable MUAC: the child was screened but not
+            // classified, so they belong in no status column at all.
+            if ($status === null) {
+                $review['children_missing_muac'] += $count;
+
                 continue;
             }
 
             // Visit type x age band x nutrition status x sex, all four taken
             // from the same record.
-            $this->add($days, $day, "{$band}_{$visit}_{$status}_{$sex}", $count);
+            $this->add($buckets, $on, "{$band}_{$visit}_{$status}_{$sex}", $count);
 
             // The PWD block spans the whole 6-59 range and has no Oedema
             // column. Bilateral pitting oedema is severe acute malnutrition
             // whatever the tape reads, so an oedematous child is counted here
             // under SAM rather than dropped out of the block altogether.
             if ($row->is_pwd) {
-                $this->add($days, $day, 'pwd_' . ($row->has_oedema ? 'sam' : $muacStatus) . "_{$sex}", $count);
+                $pwd = $row->has_oedema ? 'sam' : $muacStatus;
+
+                if ($pwd !== null) {
+                    $this->add($buckets, $on, "pwd_{$pwd}_{$sex}", $count);
+                }
             }
         }
 
         $women = PregnantLactatingWoman::query()
-            ->whereYear('date_of_reporting', $year)
-            ->whereMonth('date_of_reporting', $month)
+            ->whereBetween('date_of_reporting', $period->dateRange())
             ->when($this->siteChosen($site), fn (Builder $q) => $q->where('type_of_site', SiteVocabulary::typeOfSite($site)))
             ->selectRaw('date_of_reporting, visit_type, status_type, is_pwd, muac_mm, date_of_birth, age_years, COUNT(*) as aggregate_count')
             ->groupBy('date_of_reporting', 'visit_type', 'status_type', 'is_pwd', 'muac_mm', 'date_of_birth', 'age_years')
             ->get();
 
         foreach ($women as $row) {
-            $day = Carbon::parse($row->date_of_reporting)->day;
+            $on = Carbon::parse($row->date_of_reporting);
             $count = (int) $row->aggregate_count;
 
             // <230mm is the same threshold the template draws at 23cm.
             $classification = PregnantLactatingWoman::classifyMuac($row->muac_mm);
 
             if ($classification === null) {
+                $review['women_missing_muac'] += $count;
+
                 continue;
             }
 
@@ -184,14 +238,14 @@ class MealReportService
                 continue;
             }
 
-            $this->add($days, $day, "{$group}_{$visit}_{$wasting}_{$this->womanBand($years)}", $count);
+            $this->add($buckets, $on, "{$group}_{$visit}_{$wasting}_{$this->womanBand((int) $years)}", $count);
 
             if ($row->is_pwd) {
-                $this->add($days, $day, $classification === 'Normal' ? 'pbw_pwd_normal' : 'pbw_pwd_mam', $count);
+                $this->add($buckets, $on, $classification === 'Normal' ? 'pbw_pwd_normal' : 'pbw_pwd_mam', $count);
             }
         }
 
-        return $days;
+        return [$buckets, $review];
     }
 
     // -----------------------------------------------------------------
@@ -199,19 +253,25 @@ class MealReportService
     // -----------------------------------------------------------------
 
     /**
-     * @return array<int, array<string, int>>
+     * IYCF activity, and only that: every figure comes from the counselling
+     * and group session modules on their own activity dates. No screening
+     * record ever reaches this sheet.
+     *
+     * @return array<int, array<int, array<string, int>>>
      */
-    private function iycf(int $year, int $month, ?string $site): array
+    private function iycf(ReportPeriod $period, ?string $site): array
     {
-        $days = [];
+        $buckets = [];
 
-        $counselling = $this->counselingQuery($year, $month, $site)
+        $counselling = IndividualCounseling::query()
+            ->whereBetween('date', $period->dateRange())
+            ->when($this->siteChosen($site), fn (Builder $q) => $q->where('shelter_name', SiteVocabulary::shelterName($site)))
             ->selectRaw('date, mother_visit_type, child_visit_type, gender, p_l, consultation, status, outcome, mother_dob, mother_age_years, child_dob, age_months, COUNT(*) as aggregate_count')
             ->groupBy('date', 'mother_visit_type', 'child_visit_type', 'gender', 'p_l', 'consultation', 'status', 'outcome', 'mother_dob', 'mother_age_years', 'child_dob', 'age_months')
             ->get();
 
         foreach ($counselling as $row) {
-            $day = Carbon::parse($row->date)->day;
+            $on = Carbon::parse($row->date);
             $count = (int) $row->aggregate_count;
             $motherVisit = $row->mother_visit_type === 'follow_up' ? 'fu' : 'new';
             $childVisit = $row->child_visit_type === 'follow_up' ? 'fu' : 'new';
@@ -221,18 +281,18 @@ class MealReportService
 
             // Caregivers of a 0-23 month old, by the mother's age bracket.
             if ($motherYears !== null && $childMonths !== null && $childMonths <= 23) {
-                $this->add($days, $day, "cg_{$motherVisit}_{$this->womanBand($motherYears)}", $count);
+                $this->add($buckets, $on, "cg_{$motherVisit}_{$this->womanBand($motherYears)}", $count);
             }
 
             // "Pregnant women (only)" - p_l 'P', not the combined 'P+L'.
             if ($motherYears !== null && $row->p_l === 'P') {
-                $this->add($days, $day, "pw_{$motherVisit}_{$this->womanBand($motherYears)}", $count);
+                $this->add($buckets, $on, "pw_{$motherVisit}_{$this->womanBand($motherYears)}", $count);
             }
 
             $help = $this->helpType($row->consultation);
 
             if ($help !== null) {
-                $this->add($days, $day, "help_{$help}_{$motherVisit}", $count);
+                $this->add($buckets, $on, "help_{$help}_{$motherVisit}", $count);
             }
 
             if ($row->status === 'discharged') {
@@ -245,11 +305,11 @@ class MealReportService
                 };
 
                 if ($help !== null && $help !== 'other' && $outcome !== null) {
-                    $this->add($days, $day, "disch_{$help}_{$outcome}", $count);
+                    $this->add($buckets, $on, "disch_{$help}_{$outcome}", $count);
                 }
 
                 if (in_array($row->p_l, ['P', 'L', 'P+L'], true)) {
-                    $this->add($days, $day, 'plw_discharged', $count);
+                    $this->add($buckets, $on, 'plw_discharged', $count);
                 }
             }
 
@@ -258,23 +318,22 @@ class MealReportService
                 $sex = $row->gender === 'F' ? 'female' : 'male';
 
                 if ($childMonths <= 5) {
-                    $this->add($days, $day, "ch0_5_{$childVisit}_{$sex}", $count);
+                    $this->add($buckets, $on, "ch0_5_{$childVisit}_{$sex}", $count);
                 } elseif ($childMonths <= 23) {
-                    $this->add($days, $day, "ch6_23_{$childVisit}_{$sex}", $count);
+                    $this->add($buckets, $on, "ch6_23_{$childVisit}_{$sex}", $count);
                 }
             }
         }
 
         $sessions = GroupSession::query()
-            ->whereYear('session_date', $year)
-            ->whereMonth('session_date', $month)
+            ->whereBetween('session_date', $period->dateRange())
             ->when($this->siteChosen($site), fn (Builder $q) => $q->where('shelter_name', SiteVocabulary::shelterName($site)))
             ->selectRaw('session_date, category, visit_type, is_pwd, COUNT(*) as aggregate_count')
             ->groupBy('session_date', 'category', 'visit_type', 'is_pwd')
             ->get();
 
         foreach ($sessions as $row) {
-            $day = Carbon::parse($row->session_date)->day;
+            $on = Carbon::parse($row->session_date);
             $count = (int) $row->aggregate_count;
             $visit = $row->visit_type === 'follow_up' ? 'fu' : 'new';
 
@@ -286,30 +345,29 @@ class MealReportService
             };
 
             if ($category !== null) {
-                $this->add($days, $day, "part_{$category}_{$visit}", $count);
+                $this->add($buckets, $on, "part_{$category}_{$visit}", $count);
             }
 
             if ($row->is_pwd) {
-                $this->add($days, $day, 'participants_disabled', $count);
+                $this->add($buckets, $on, 'participants_disabled', $count);
             }
 
-            $this->add($days, $day, 'participants_total', $count);
+            $this->add($buckets, $on, 'participants_total', $count);
         }
 
         // A "session conducted" is a distinct session group on a given day.
         $conducted = GroupSession::query()
-            ->whereYear('session_date', $year)
-            ->whereMonth('session_date', $month)
+            ->whereBetween('session_date', $period->dateRange())
             ->when($this->siteChosen($site), fn (Builder $q) => $q->where('shelter_name', SiteVocabulary::shelterName($site)))
             ->selectRaw('session_date, COUNT(DISTINCT session_group_number) as aggregate_count')
             ->groupBy('session_date')
             ->get();
 
         foreach ($conducted as $row) {
-            $this->add($days, Carbon::parse($row->session_date)->day, 'group_sessions', (int) $row->aggregate_count);
+            $this->add($buckets, Carbon::parse($row->session_date), 'group_sessions', (int) $row->aggregate_count);
         }
 
-        return $days;
+        return $buckets;
     }
 
     // -----------------------------------------------------------------
@@ -317,15 +375,22 @@ class MealReportService
     // -----------------------------------------------------------------
 
     /**
-     * @return array<int, array<string, int|float>>
+     * The CMAM treatment journey, and only that: admission, then closure.
+     * Every figure comes from follow_up_children.
+     *
+     * A repeated screening in the Children module is a screening follow-up,
+     * never a CMAM event, so nothing on this sheet is derived from how often a
+     * child ID appears there - and a Normal screening is never a recovery.
+     *
+     * @return array<int, array<int, array<string, int|float>>>
      */
-    private function cmam(int $year, int $month, ?string $site): array
+    private function cmam(ReportPeriod $period, ?string $site): array
     {
-        $days = [];
+        $buckets = [];
 
+        // Admissions fall in the month they were admitted in.
         $admissions = $this->followUpQuery($site)
-            ->whereYear('admission_date', $year)
-            ->whereMonth('admission_date', $month)
+            ->whereBetween('admission_date', $period->dateRange())
             ->selectRaw('admission_date, admitted_with, sex, dob, COUNT(*) as aggregate_count')
             ->groupBy('admission_date', 'admitted_with', 'sex', 'dob')
             ->get();
@@ -341,19 +406,17 @@ class MealReportService
             // Every admission is counted as "New": nothing distinguishes a
             // relapse or a readmission - see unsupportedColumns().
             $this->add(
-                $days,
-                Carbon::parse($row->admission_date)->day,
+                $buckets,
+                Carbon::parse($row->admission_date),
                 "{$programme}_adm_{$band}_new_{$this->cmamSex($row->sex)}",
                 (int) $row->aggregate_count,
             );
         }
 
-        // discharge_date is a free-text varchar, so it is matched as an ISO
-        // prefix rather than compared as a date.
-        $prefix = sprintf('%04d-%02d', $year, $month);
-
+        // Discharges fall in the month they were discharged in, which is a
+        // different window from the admissions above.
         $discharges = $this->followUpQuery($site)
-            ->where('discharge_date', 'like', $prefix . '%')
+            ->whereBetween('discharge_date', $period->dateRange())
             ->selectRaw('discharge_date, admission_date, discharge_outcome, admitted_with, sex, dob, COUNT(*) as aggregate_count')
             ->groupBy('discharge_date', 'admission_date', 'discharge_outcome', 'admitted_with', 'sex', 'dob')
             ->get();
@@ -361,66 +424,64 @@ class MealReportService
         $stays = [];
 
         foreach ($discharges as $row) {
-            $dischargedOn = $this->parseLooseDate($row->discharge_date);
+            $dischargedOn = Carbon::parse($row->discharge_date);
             $programme = $this->programme($row->admitted_with);
+
+            // The age band is the child's age on admission, so a case stays in
+            // the band it was admitted into however long the treatment ran.
             $band = $this->cmamBand($this->monthsBetween($row->dob, $row->admission_date));
 
-            if ($dischargedOn === null || $programme === null || $band === null) {
+            if ($programme === null || $band === null) {
                 continue;
             }
 
-            $day = $dischargedOn->day;
             $count = (int) $row->aggregate_count;
             $sex = $this->cmamSex($row->sex);
 
+            // Only a recorded closure is a discharge, and 'cured' is the only
+            // thing that counts as recovered.
             $outcome = match ($row->discharge_outcome) {
                 'cured' => 'recovered',
                 'defaulted' => 'defaulted',
                 'died' => 'died',
                 'discharge_to_opt' => 'referred_medical',
                 'discharge_to_other' => 'other',
-                // 'under_follow_up' is not a discharge at all.
+                // 'under_follow_up' is an open case, not a discharge at all.
                 default => null,
             };
 
             if ($outcome !== null) {
-                $this->add($days, $day, "{$programme}_dis_{$outcome}_{$band}_{$sex}", $count);
+                $this->add($buckets, $dischargedOn, "{$programme}_dis_{$outcome}_{$band}_{$sex}", $count);
             }
 
             if ($programme === 'sam' && $row->discharge_outcome === 'discharge_to_opt') {
-                $this->add($days, $day, "sam_referred_{$band}_{$sex}", $count);
+                $this->add($buckets, $dischargedOn, "sam_referred_{$band}_{$sex}", $count);
             }
 
             if ($row->admission_date !== null) {
                 $length = Carbon::parse($row->admission_date)->diffInDays($dischargedOn, absolute: true);
                 $key = "{$programme}_los_{$band}_{$sex}";
-                $stays[$day][$key][] = ['days' => $length, 'weight' => $count];
+                $stays[$dischargedOn->month][$dischargedOn->day][$key][] = ['days' => $length, 'weight' => $count];
             }
         }
 
         // Length of stay is an average, so it is accumulated separately.
-        foreach ($stays as $day => $keys) {
-            foreach ($keys as $key => $entries) {
-                $weight = array_sum(array_column($entries, 'weight'));
-                $total = array_sum(array_map(fn (array $e): float => $e['days'] * $e['weight'], $entries));
-                $days[$day][$key] = $weight > 0 ? round($total / $weight, 1) : null;
+        foreach ($stays as $month => $daysOfMonth) {
+            foreach ($daysOfMonth as $day => $keys) {
+                foreach ($keys as $key => $entries) {
+                    $weight = array_sum(array_column($entries, 'weight'));
+                    $total = array_sum(array_map(fn (array $e): float => $e['days'] * $e['weight'], $entries));
+                    $buckets[$month][$day][$key] = $weight > 0 ? round($total / $weight, 1) : null;
+                }
             }
         }
 
-        return $days;
+        return $buckets;
     }
 
     // -----------------------------------------------------------------
     // Shared query pieces
     // -----------------------------------------------------------------
-
-    private function counselingQuery(int $year, int $month, ?string $site): Builder
-    {
-        return IndividualCounseling::query()
-            ->whereYear('date', $year)
-            ->whereMonth('date', $month)
-            ->when($this->siteChosen($site), fn (Builder $q) => $q->where('shelter_name', SiteVocabulary::shelterName($site)));
-    }
 
     /**
      * follow_up_children.shelter_name is free text, so the site filter has to
@@ -448,54 +509,77 @@ class MealReportService
     // -----------------------------------------------------------------
 
     /**
-     * Turn the day => key => count map into ordered rows plus a totals row.
+     * Turn the month => day => key => count map into ordered rows plus a
+     * totals row.
      *
-     * @param  array<int, array<string, int|float>>  $days
-     * @return array{rows: array<int, array<string, int|float|string|null>>, totals: array<string, int|float|null>}
+     * The months are walked in calendar order - never alphabetical - and every
+     * month in the period gets rows, including one with no data at all: a
+     * monitoring report is read as a sequence, and a month that quietly
+     * disappeared would read as a month nobody was meant to look at.
+     *
+     * @param  array<int, array<int, array<string, int|float>>>  $buckets
+     * @param  array<string, int>  $review
+     * @return array{rows: array, totals: array, monthStarts: array<int>, review: array<string, int>}
      */
-    private function finalise(string $sheet, int $year, int $month, ?string $site, array $days): array
+    private function finalise(string $sheet, ReportPeriod $period, ?string $site, array $buckets, array $review = []): array
     {
         $columns = MealReportLayout::columns($sheet);
         $unsupported = array_flip(self::unsupportedColumns()[$sheet]);
         $averages = array_flip(MealReportLayout::averageColumns($sheet));
-        $monthLabel = Carbon::create($year, $month, 1)->format('F');
-
-        ksort($days);
 
         $rows = [];
+        $monthStarts = [];
         $totals = array_fill_keys($columns, 0);
         $averageBuckets = [];
 
-        foreach ($days as $day => $values) {
-            $row = [];
+        foreach ($period->months() as $month) {
+            $monthLabel = $period->monthLabel($month);
+            $daysOfMonth = $buckets[$month] ?? [];
+            ksort($daysOfMonth);
 
-            foreach ($columns as $key) {
-                $row[$key] = match (true) {
-                    $key === 'mba' => SiteVocabulary::label($site),
-                    $key === 'month' => $monthLabel,
-                    $key === 'day' => $day,
-                    isset($unsupported[$key]) => null,
-                    default => $values[$key] ?? 0,
-                };
+            // Index of this month's first row, so the exporter can rule a line
+            // between one month and the next.
+            $monthStarts[] = count($rows);
 
-                if (isset($unsupported[$key]) || in_array($key, ['mba', 'month', 'day'], true)) {
-                    continue;
-                }
-
-                if (isset($averages[$key])) {
-                    if ($row[$key] !== null && $row[$key] > 0) {
-                        $averageBuckets[$key][] = $row[$key];
-                    }
-
-                    continue;
-                }
-
-                $totals[$key] += $row[$key];
+            // A month with nothing in it still gets a row, all zero, so the
+            // sequence of months in the file stays unbroken.
+            if ($daysOfMonth === []) {
+                $daysOfMonth = ['' => []];
             }
 
-            $rows[] = $row;
+            foreach ($daysOfMonth as $day => $values) {
+                $row = [];
+
+                foreach ($columns as $key) {
+                    $row[$key] = match (true) {
+                        $key === 'mba' => SiteVocabulary::label($site),
+                        $key === 'month' => $monthLabel,
+                        $key === 'day' => $day === '' ? '' : $day,
+                        isset($unsupported[$key]) => null,
+                        default => $values[$key] ?? 0,
+                    };
+
+                    if (isset($unsupported[$key]) || in_array($key, ['mba', 'month', 'day'], true)) {
+                        continue;
+                    }
+
+                    if (isset($averages[$key])) {
+                        if ($row[$key] !== null && $row[$key] > 0) {
+                            $averageBuckets[$key][] = $row[$key];
+                        }
+
+                        continue;
+                    }
+
+                    $totals[$key] += $row[$key];
+                }
+
+                $rows[] = $row;
+            }
         }
 
+        // The Total row spans the selected months and nothing else: every
+        // query above is already narrowed to the period.
         $totals['mba'] = 'Total';
         $totals['month'] = '';
         $totals['day'] = '';
@@ -510,15 +594,21 @@ class MealReportService
             $totals[$key] = $bucket === [] ? 0 : round(array_sum($bucket) / count($bucket), 1);
         }
 
-        return ['rows' => $rows, 'totals' => $totals];
+        return ['rows' => $rows, 'totals' => $totals, 'monthStarts' => $monthStarts, 'review' => $review];
     }
 
     /**
-     * @param  array<int, array<string, int|float>>  $days
+     * File a count under the month and day of the date it happened on, which
+     * is what keeps one month's data out of another month's rows.
+     *
+     * @param  array<int, array<int, array<string, int|float>>>  $buckets
      */
-    private function add(array &$days, int $day, string $key, int $count): void
+    private function add(array &$buckets, Carbon $on, string $key, int $count): void
     {
-        $days[$day][$key] = ($days[$day][$key] ?? 0) + $count;
+        $month = $on->month;
+        $day = $on->day;
+
+        $buckets[$month][$day][$key] = ($buckets[$month][$day][$key] ?? 0) + $count;
     }
 
     // -----------------------------------------------------------------
@@ -611,19 +701,5 @@ class MealReportService
     private function cmamSex(?string $sex): string
     {
         return $sex === 'F' ? 'female' : 'male';
-    }
-
-    /** discharge_date is free text; only an ISO-looking value can be used. */
-    private function parseLooseDate(?string $value): ?Carbon
-    {
-        if (blank($value) || preg_match('/^\d{4}-\d{2}-\d{2}/', $value) !== 1) {
-            return null;
-        }
-
-        try {
-            return Carbon::parse(substr($value, 0, 10));
-        } catch (\Throwable) {
-            return null;
-        }
     }
 }

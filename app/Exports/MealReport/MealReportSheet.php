@@ -18,6 +18,12 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  * The cell values (including the header captions) are written by FromArray;
  * AfterSheet then applies the merges, fills and rotations that turn those flat
  * rows back into the template's multi-level header.
+ *
+ * A report covering several months writes them one after another down this
+ * same grid, in calendar order, each row naming its own month in the template's
+ * MONTH column. The only thing the extra months add is a rule drawn across the
+ * row each new month starts on, so the sections are easy to find; no column,
+ * header or sheet is added or moved.
  */
 class MealReportSheet implements FromArray, WithEvents, WithTitle
 {
@@ -53,11 +59,13 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
     /**
      * @param  array<int, array<string, int|float|string|null>>  $rows
      * @param  array<string, int|float|string|null>  $totals
+     * @param  array<int>  $monthStarts  row offsets, into $rows, where a month begins
      */
     public function __construct(
         private readonly string $sheet,
         private readonly array $rows,
         private readonly array $totals,
+        private readonly array $monthStarts = [],
     ) {
     }
 
@@ -201,6 +209,8 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
             ]);
 
             $sheet->mergeCells("A{$lastRow}:C{$lastRow}");
+
+            $this->ruleOffMonths($sheet, $firstDataRow, $lastColumn);
         }
 
         $sheet->getColumnDimension('A')->setWidth(12);
@@ -212,5 +222,25 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
         }
 
         $sheet->freezePane('D' . ($leafRow + 1));
+    }
+
+    /**
+     * Draw a rule across the first row of each month after the first, so a
+     * multi-month workbook reads as a sequence of months rather than one long
+     * undifferentiated run of days.
+     *
+     * Formatting only: no row is inserted and no caption is written, so a
+     * single-month report comes out byte for byte as it did before.
+     */
+    private function ruleOffMonths(Worksheet $sheet, int $firstDataRow, string $lastColumn): void
+    {
+        foreach (array_slice($this->monthStarts, 1) as $offset) {
+            $row = $firstDataRow + $offset;
+
+            $sheet->getStyle("A{$row}:{$lastColumn}{$row}")
+                ->getBorders()
+                ->getTop()
+                ->setBorderStyle(Border::BORDER_MEDIUM);
+        }
     }
 }

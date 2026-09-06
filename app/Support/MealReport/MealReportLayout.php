@@ -245,13 +245,14 @@ final class MealReportLayout
     ];
 
     /**
-     * Every sheet, in the order the workbook presents them.
+     * Every sheet, in the order the official workbook presents them: IYCF
+     * first, then Screening, then CMAM.
      *
      * @return array<string>
      */
     public static function sheets(): array
     {
-        return [self::SHEET_SCREENING, self::SHEET_IYCF, self::SHEET_CMAM];
+        return [self::SHEET_IYCF, self::SHEET_SCREENING, self::SHEET_CMAM];
     }
 
     /**
