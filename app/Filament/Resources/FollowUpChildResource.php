@@ -197,10 +197,17 @@ class FollowUpChildResource extends Resource
                         Forms\Components\DatePicker::make('visit_date')
                             ->label(__('fields.visit_date'))
                             ->required(),
+                        // The date is what makes a visit a visit; the reading
+                        // is not always taken. A child seen and referred to a
+                        // hospital was still seen, and requiring the
+                        // measurement here forced the team to either invent a
+                        // number or leave the visit out of the record. Left
+                        // blank the visit is listed under "Missing follow-up
+                        // measurements" in the Referral Centre until somebody
+                        // finds the reading.
                         Forms\Components\TextInput::make('muac')
                             ->label(__('fields.muac'))
-                            ->numeric()
-                            ->required(),
+                            ->numeric(),
                     ])
                     ->columns(2)
                     ->itemNumbers()
@@ -280,6 +287,21 @@ class FollowUpChildResource extends Resource
                     ->label(__('fields.admission_date'))
                     ->date()
                     ->sortable(),
+                Tables\Columns\TextColumn::make('admitted_with')
+                    ->label(__('fields.admitted_with'))
+                    ->badge()
+                    ->color(fn (?string $state): string => MuacClassifier::color($state)),
+                Tables\Columns\TextColumn::make('latest_visit_number')
+                    ->label(__('fields.latest_visit_number'))
+                    // Read off the eager-loaded relation, so the column costs
+                    // nothing beyond the load the table already does.
+                    ->state(fn (FollowUpChild $record): ?int => $record->visits->last()?->visit_number)
+                    ->badge()
+                    ->color('info'),
+                Tables\Columns\TextColumn::make('latest_visit_date')
+                    ->label(__('fields.latest_visit_date'))
+                    ->state(fn (FollowUpChild $record): mixed => $record->visits->last()?->visit_date)
+                    ->date(),
                 Tables\Columns\TextColumn::make('discharge_date')
                     ->label(__('fields.discharge_date'))
                     ->date('Y-m-d')
@@ -306,6 +328,11 @@ class FollowUpChildResource extends Resource
                     ->label(__('fields.latest_muac'))
                     ->state(fn (FollowUpChild $record): mixed => $record->latest_muac)
                     ->badge()
+                    // A visit with no reading says so. Nothing supplies a
+                    // value for it and the visit itself is never removed.
+                    ->formatStateUsing(fn (mixed $state): string => blank($state)
+                        ? __('ui.referral_center.status.missing_muac')
+                        : (string) $state)
                     ->color(fn ($state): string => MuacClassifier::color(MuacClassifier::classify($state))),
                 Tables\Columns\TextColumn::make('record_state')
                     ->label(__('fields.record_state'))

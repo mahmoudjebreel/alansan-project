@@ -271,11 +271,32 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
 
         $messages = array_merge($messages, $this->validateRow($attributes, $rejected));
 
-        // A visit needs a date to be meaningful; drop empty placeholders.
-        $visits = array_values(array_filter(
-            $visits,
-            fn (array $visit): bool => filled($visit['visit_date']) || filled($visit['muac']),
-        ));
+        // A visit is its date, exactly as the manual form now reads it: two
+        // blank cells are a gap in the sheet and are dropped, a date with no
+        // measurement is a visit that happened without one being taken, and a
+        // measurement with no date is a reading nobody can place in time.
+        //
+        // The missing date is named right here rather than left to the
+        // database. As a NOT NULL failure it surfaced on the first offending
+        // row, rolled the whole file back and reported that one row alone - so
+        // a file carrying three of them took three uploads to learn all three.
+        foreach ($visits as $number => $visit) {
+            if (filled($visit['visit_date'])) {
+                continue;
+            }
+
+            if (! filled($visit['muac'])) {
+                unset($visits[$number]);
+
+                continue;
+            }
+
+            $messages[] = __('fields.import_required', [
+                'field' => __('fields.visit_date_n', ['n' => $number]),
+            ]);
+        }
+
+        $visits = array_values($visits);
 
         // Same for a session: three blank cells are a gap in the sheet, not a
         // session that was held. Kept in column order, which is session order.

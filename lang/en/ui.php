@@ -98,6 +98,15 @@ return [
     // -----------------------------------------------------------------
     // Referral Centre: reviewing an upload's SAM/MAM children
     // -----------------------------------------------------------------
+    // -----------------------------------------------------------------
+    // Follow Up Child listing tabs
+    // -----------------------------------------------------------------
+    'follow_up_tabs' => [
+        'all' => 'All cases',
+        'active' => 'Active follow-up',
+        'closed' => 'Closed / discharged',
+    ],
+
     'referral_center' => [
         'title' => 'Referral Centre',
         'nav' => 'Referral Centre',
@@ -118,21 +127,49 @@ return [
         'columns' => [
             'classification' => 'SAM / MAM',
             'status' => 'Referral status',
+            'follow_up_status' => 'Current follow-up',
             'age' => 'Age',
         ],
         'status' => [
             'pending' => 'Awaiting review',
+            'previously_followed' => 'Closed / previously followed',
+            'in_follow_up' => 'Already in follow-up',
+            'needs_review' => 'Needs review (no MUAC)',
+            'missing_muac' => 'Missing',
+        ],
+        'follow_up_status' => [
+            'pending' => 'Never followed up',
+            'previously_followed' => 'Closed episode on file',
+            'in_follow_up' => 'Active follow-up',
+            'needs_review' => 'Never followed up',
+        ],
+        'status_filter' => [
+            'all' => 'Every screened child (SAM, MAM and no MUAC)',
+            'eligible' => 'Waiting for a decision',
+        ],
+        'counters' => [
+            'pending' => 'Pending referrals',
+            'previously_followed' => 'Closed / previously followed',
+            'in_follow_up' => 'Already in follow-up',
+            'needs_review' => 'Missing MUAC',
+            'active_follow_ups' => 'Active follow-ups',
+            'closed_cases' => 'Closed cases',
+            'missing_follow_up_muac' => 'Missing follow-up measurements',
         ],
         'refer_selected' => 'Refer selected',
         'confirm_heading' => 'Confirm referral',
         'confirm_body' => 'A follow-up record and an initial visit will be opened for each selected child. The Children records themselves are not moved or changed.',
         'confirm_submit' => 'Confirm referral',
+        'view_follow_up' => 'View follow-up',
         'referred' => 'Referred :count children to follow-up.',
         'skipped' => ':count were skipped (already under follow-up, or no longer SAM/MAM).',
+        'skipped_active' => ':count already have an active follow-up and were left alone.',
+        'skipped_closed' => ':count have a closed follow-up record and were left alone.',
+        'skipped_ineligible' => ':count are no longer SAM or MAM and were left alone.',
         'failed' => ':count could not be referred and were left for a retry.',
         'nothing_selected' => 'No children were selected.',
         'empty_heading' => 'No children are waiting for referral',
-        'empty_description' => 'Every SAM or MAM child in this selection is already under follow-up.',
+        'empty_description' => 'Every SAM or MAM child in this selection already has a follow-up record, open or closed.',
     ],
 
     // -----------------------------------------------------------------

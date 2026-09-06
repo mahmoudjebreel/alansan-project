@@ -8,6 +8,17 @@
         ['key' => 'unmeasured', 'color' => 'gray'],
         ['key' => 'eligible', 'color' => 'primary'],
     ];
+
+    // Where every case currently stands, counted in the database rather than
+    // added up from what happens to be on this page of the table.
+    $statuses = $this->statusSummary();
+    $counters = [
+        ['key' => 'pending', 'color' => 'warning'],
+        ['key' => 'active_follow_ups', 'color' => 'success'],
+        ['key' => 'closed_cases', 'color' => 'gray'],
+        ['key' => 'needs_review', 'color' => 'danger'],
+        ['key' => 'missing_follow_up_muac', 'color' => 'danger'],
+    ];
 @endphp
 
 <x-filament-panels::page>
@@ -27,6 +38,27 @@
                     'text-primary-600 dark:text-primary-400' => $card['color'] === 'primary',
                 ])>
                     {{ number_format($summary[$card['key']]) }}
+                </div>
+            </x-filament::section>
+        @endforeach
+    </div>
+
+    {{-- Where the cases stand: what is waiting, what is being treated, what
+         has closed, and the two kinds of missing measurement. --}}
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+        @foreach ($counters as $counter)
+            <x-filament::section compact>
+                <div class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ __('ui.referral_center.counters.' . $counter['key']) }}
+                </div>
+                <div @class([
+                    'mt-1 text-2xl font-bold',
+                    'text-gray-950 dark:text-white' => $counter['color'] === 'gray',
+                    'text-success-600 dark:text-success-400' => $counter['color'] === 'success',
+                    'text-warning-600 dark:text-warning-400' => $counter['color'] === 'warning',
+                    'text-danger-600 dark:text-danger-400' => $counter['color'] === 'danger',
+                ])>
+                    {{ number_format($statuses[$counter['key']]) }}
                 </div>
             </x-filament::section>
         @endforeach

@@ -957,9 +957,37 @@ final class ImportDefinition
                         'Discharge to OPT' => 'discharge_to_opt',
                         'Discharged to OPT' => 'discharge_to_opt',
 
+                        // The teams write the programme as OTP, not OPT, and
+                        // say which site the child went to: "Discharge to
+                        // other OTP" is a transfer to another outpatient site,
+                        // which is this outcome under the spelling they use.
+                        'OTP' => 'discharge_to_opt',
+                        'Discharge to OTP' => 'discharge_to_opt',
+                        'Discharge to other OTP' => 'discharge_to_opt',
+                        'Discharged to other OTP' => 'discharge_to_opt',
+                        'تخريج إلى OTP' => 'discharge_to_opt',
+
                         'تخريج إلى جهة أخرى' => 'discharge_to_other',
                         'Discharge to Other' => 'discharge_to_other',
                         'Discharged to Other' => 'discharge_to_other',
+
+                        // Three exits the sheets record that the option list
+                        // has no separate name for: a child referred out for a
+                        // medical reason, one who stopped responding to
+                        // treatment, and the catch-all the teams type. All
+                        // three leave the programme for somewhere else, which
+                        // is what "discharged to another entity" means here.
+                        // Read off a workbook that was actually submitted.
+                        'case discharged other' => 'discharge_to_other',
+                        'Referred For Medical Reason(inpt)' => 'discharge_to_other',
+                        'Referred for Medical Reason' => 'discharge_to_other',
+                        'Referred for Medical Reasons' => 'discharge_to_other',
+                        'محول لسبب طبي' => 'discharge_to_other',
+                        'Non Responed' => 'discharge_to_other',
+                        'Non Responded' => 'discharge_to_other',
+                        'Non Responder' => 'discharge_to_other',
+                        'Non-responder' => 'discharge_to_other',
+                        'غير مستجيب' => 'discharge_to_other',
 
                         'متوفى' => 'died',
                         'توفي' => 'died',

@@ -296,6 +296,8 @@ return [
     'add_visit' => 'Add Visit',
     'visits_recorded' => 'Visits Recorded',
     'latest_muac' => 'Latest MUAC (mm)',
+    'latest_visit_number' => 'Latest visit',
+    'latest_visit_date' => 'Latest visit date',
     'M' => 'Male',
     'F' => 'Female',
     // Individual Counseling stores and shows the short codes, not the words.

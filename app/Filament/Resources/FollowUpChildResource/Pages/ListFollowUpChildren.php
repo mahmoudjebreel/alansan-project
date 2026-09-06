@@ -8,8 +8,12 @@ use App\Exports\FollowUpChildrenExport;
 use App\Exports\FollowUpChildPdfExport;
 use App\Filament\Resources\FollowUpChildResource;
 use App\Filament\Concerns\HasExcelImport;
+use App\Models\FollowUpChild;
+use App\Support\Referral\ReferralCandidates;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
+use Filament\Schemas\Components\Tabs\Tab;
+use Illuminate\Database\Eloquent\Builder;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListFollowUpChildren extends ListRecords
@@ -17,6 +21,43 @@ class ListFollowUpChildren extends ListRecords
     use HasExcelImport;
 
     protected static string $resource = FollowUpChildResource::class;
+
+    /**
+     * Open episodes and finished ones, told apart.
+     *
+     * The split is the model's own: a record is closed when its discharge
+     * outcome is one of the five that end an episode, and open otherwise.
+     * No new status is introduced here and nothing is filtered out - "All"
+     * is still the first tab and still shows exactly what it always did.
+     *
+     * @see \App\Models\FollowUpChild::CLOSING_OUTCOMES
+     *
+     * @return array<string, Tab>
+     */
+    public function getTabs(): array
+    {
+        return [
+            'all' => Tab::make(__('ui.follow_up_tabs.all'))
+                ->badge(fn (): int => FollowUpChild::query()->count()),
+
+            'active' => Tab::make(__('ui.follow_up_tabs.active'))
+                ->icon('heroicon-o-arrow-path')
+                ->badge(fn (): int => ReferralCandidates::activeFollowUps()->count())
+                ->badgeColor('success')
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                    ->where(function (Builder $query): void {
+                        $query->whereNull('discharge_outcome')
+                            ->orWhereNotIn('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES);
+                    })),
+
+            'closed' => Tab::make(__('ui.follow_up_tabs.closed'))
+                ->icon('heroicon-o-lock-closed')
+                ->badge(fn (): int => ReferralCandidates::closedFollowUps()->count())
+                ->badgeColor('gray')
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                    ->whereIn('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES)),
+        ];
+    }
 
     protected function getHeaderActions(): array
     {

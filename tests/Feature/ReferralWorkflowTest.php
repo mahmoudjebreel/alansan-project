@@ -7,6 +7,7 @@ use App\Filament\Pages\ReferralCenter;
 use App\Imports\ImportDefinition;
 use App\Models\Child;
 use App\Models\FollowUpChild;
+use App\Models\FollowUpChildVisit;
 use App\Models\ReferralBatch;
 use App\Models\User;
 use App\Services\ExcelImportService;
@@ -15,6 +16,7 @@ use App\Support\Notifications\ActionType;
 use App\Support\Referral\ReferralCandidates;
 use App\Support\Referral\ReferralProcessor;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Maatwebsite\Excel\Concerns\FromArray;
@@ -108,7 +110,7 @@ class ReferralWorkflowTest extends TestCase
         $this->assertFalse(ReferralCandidates::query()->pluck('id')->contains($child->id));
     }
 
-    public function test_a_child_whose_previous_episode_is_closed_is_a_candidate_again(): void
+    public function test_a_child_whose_previous_episode_is_closed_is_not_a_candidate(): void
     {
         $child = $this->child(110, ['child_id' => 'CH-CLOSED']);
 
@@ -117,9 +119,18 @@ class ReferralWorkflowTest extends TestCase
             'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
         ]);
 
-        // The existing rule: only an open episode blocks a new one. A closed
-        // one is a finished episode, and a relapse is a new admission.
-        $this->assertTrue(ReferralCandidates::query()->pluck('id')->contains($child->id));
+        // A closed episode is a finished treatment history. The child is
+        // still listed - under "closed" - but is never offered for referral,
+        // because opening a second episode behind the first is a decision
+        // this screen does not take.
+        $this->assertFalse(ReferralCandidates::query()->pluck('id')->contains($child->id));
+
+        $this->assertTrue(
+            ReferralCandidates::scopeToStatus(
+                ReferralCandidates::overview(),
+                ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
+            )->pluck('id')->contains($child->id),
+        );
     }
 
     public function test_only_the_children_of_the_selected_batch_are_listed(): void
@@ -178,7 +189,14 @@ class ReferralWorkflowTest extends TestCase
 
         $result = ReferralProcessor::refer([$child->id]);
 
-        $this->assertSame(['referred' => 1, 'skipped' => 0, 'failed' => 0], $result);
+        $this->assertSame([
+            'referred' => 1,
+            'skipped' => 0,
+            'skipped_active' => 0,
+            'skipped_closed' => 0,
+            'skipped_ineligible' => 0,
+            'failed' => 0,
+        ], $result);
 
         $followUp = FollowUpChild::with('visits')->firstWhere('id_number', 'CH-REF');
 
@@ -230,7 +248,15 @@ class ReferralWorkflowTest extends TestCase
 
         $result = ReferralProcessor::refer([$child->id]);
 
-        $this->assertSame(['referred' => 0, 'skipped' => 1, 'failed' => 0], $result);
+        // Not SAM or MAM: a reason of its own, and not "already followed up".
+        $this->assertSame([
+            'referred' => 0,
+            'skipped' => 1,
+            'skipped_active' => 0,
+            'skipped_closed' => 0,
+            'skipped_ineligible' => 1,
+            'failed' => 0,
+        ], $result);
         $this->assertSame(0, FollowUpChild::count());
     }
 
@@ -250,6 +276,7 @@ class ReferralWorkflowTest extends TestCase
         $this->assertSame(1, $first['referred']);
         $this->assertSame(0, $second['referred']);
         $this->assertSame(1, $second['skipped']);
+        $this->assertSame(1, $second['skipped_active']);
 
         $this->assertSame(1, FollowUpChild::where('id_number', 'CH-TWICE')->count());
         $this->assertSame(1, FollowUpChild::first()->visits()->count());
@@ -268,6 +295,7 @@ class ReferralWorkflowTest extends TestCase
 
         $this->assertSame(1, $result['referred']);
         $this->assertSame(1, $result['skipped']);
+        $this->assertSame(1, $result['skipped_active']);
         $this->assertSame(1, FollowUpChild::where('id_number', 'CH-DUP')->count());
     }
 
@@ -285,6 +313,7 @@ class ReferralWorkflowTest extends TestCase
         $result = ReferralProcessor::refer([$child->id]);
 
         $this->assertSame(0, $result['referred']);
+        $this->assertSame(1, $result['skipped_active']);
         $this->assertSame(1, FollowUpChild::where('id_number', 'CH-OPEN2')->count());
     }
 
@@ -552,9 +581,427 @@ class ReferralWorkflowTest extends TestCase
         }
     }
 
+    // =================================================================
+    // The three cases a confirmed referral has to tell apart
+    // =================================================================
+
+    /**
+     * Case one. Nothing on file for this child ID, so the referral opens the
+     * record and its first visit, and nothing else.
+     */
+    public function test_a_child_with_no_follow_up_is_pending_and_is_referred(): void
+    {
+        $this->actingAsRole();
+
+        $child = $this->child(110, ['child_id' => 'CASE-NEW', 'visit_type' => 'new']);
+
+        $this->assertSame(ReferralCandidates::STATUS_PENDING, ReferralCandidates::statusFor($child));
+
+        $result = ReferralProcessor::refer([$child->id]);
+
+        $this->assertSame(1, $result['referred']);
+        $this->assertSame(0, $result['skipped']);
+
+        $episode = FollowUpChild::firstWhere('id_number', 'CASE-NEW');
+
+        $this->assertNotNull($episode);
+        $this->assertSame(1, $episode->visits()->count());
+        $this->assertSame(1, $episode->visits()->first()->visit_number);
+        $this->assertSame('new', $child->fresh()->visit_type);
+    }
+
+    /**
+     * Case two. An episode is open, so the child is reported as being in
+     * follow-up and absolutely nothing is written.
+     */
+    public function test_an_active_follow_up_is_reported_and_never_duplicated(): void
+    {
+        $this->actingAsRole();
+
+        $child = $this->child(110, ['child_id' => 'CASE-ACTIVE', 'visit_type' => 'new']);
+
+        $episode = FollowUpChild::factory()->create([
+            'id_number' => 'CASE-ACTIVE',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+        $episode->visits()->create(['visit_number' => 1, 'visit_date' => '2026-04-01', 'muac' => 111]);
+
+        $this->assertSame(ReferralCandidates::STATUS_IN_FOLLOW_UP, ReferralCandidates::statusFor($child));
+
+        $result = ReferralProcessor::refer([$child->id]);
+
+        $this->assertSame(0, $result['referred']);
+        $this->assertSame(1, $result['skipped_active']);
+        $this->assertSame(0, $result['failed'], 'An existing follow-up is not a failure.');
+
+        // No second record, no second visit, and the episode as it was.
+        $this->assertSame(1, FollowUpChild::where('id_number', 'CASE-ACTIVE')->count());
+        $this->assertSame(1, $episode->fresh()->visits()->count());
+        $this->assertSame(FollowUpChild::ACTIVE_OUTCOME, $episode->fresh()->discharge_outcome);
+        $this->assertSame('new', $child->fresh()->visit_type);
+    }
+
+    /**
+     * Case three. Every episode on file is closed: it stays closed, and no
+     * new one is opened behind it.
+     */
+    public function test_a_closed_follow_up_is_reported_and_never_reopened(): void
+    {
+        $this->actingAsRole();
+
+        $child = $this->child(110, ['child_id' => 'CASE-CLOSED', 'visit_type' => 'new']);
+
+        $episode = FollowUpChild::factory()->create([
+            'id_number' => 'CASE-CLOSED',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+            'discharge_date' => '2026-04-30',
+        ]);
+
+        $this->assertSame(
+            ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
+            ReferralCandidates::statusFor($child),
+        );
+
+        $result = ReferralProcessor::refer([$child->id]);
+
+        $this->assertSame(0, $result['referred']);
+        $this->assertSame(1, $result['skipped_closed']);
+        $this->assertSame(0, $result['failed'], 'A closed follow-up is not a failure.');
+
+        $this->assertSame(1, FollowUpChild::where('id_number', 'CASE-CLOSED')->count());
+        $this->assertSame(0, $episode->fresh()->visits()->count());
+        $this->assertSame(FollowUpChild::CURED_OUTCOME, $episode->fresh()->discharge_outcome);
+        $this->assertSame('2026-04-30', $episode->fresh()->discharge_date->toDateString());
+        $this->assertSame('new', $child->fresh()->visit_type);
+    }
+
+    /**
+     * The historical upload: a child with a long finished episode who turns
+     * up in a later Children sheet is recognised by their ID, not their name.
+     */
+    public function test_a_historically_imported_episode_blocks_a_second_admission(): void
+    {
+        $this->actingAsRole();
+
+        $episode = FollowUpChild::factory()->create([
+            'id_number' => '470979444',
+            'child_name' => 'A completely different spelling',
+            'discharge_outcome' => 'defaulted',
+        ]);
+
+        foreach (range(1, 8) as $number) {
+            $episode->visits()->create([
+                'visit_number' => $number,
+                'visit_date' => '2026-01-0' . min($number, 9),
+                'muac' => 110 + $number,
+            ]);
+        }
+
+        $child = $this->child(110, ['child_id' => '470979444', 'name' => 'Another spelling again']);
+
+        $result = ReferralProcessor::refer([$child->id]);
+
+        $this->assertSame(0, $result['referred']);
+        $this->assertSame(1, $result['skipped_closed']);
+        $this->assertSame(1, FollowUpChild::where('id_number', '470979444')->count());
+        $this->assertSame(8, $episode->fresh()->visits()->count());
+    }
+
+    // =================================================================
+    // A mixed bulk selection
+    // =================================================================
+
+    /**
+     * Ten children in one confirmation: six new, three in an open episode,
+     * one closed. Each is decided on its own, and one that cannot be referred
+     * never stops the ones that can.
+     */
+    public function test_a_mixed_selection_refers_only_the_eligible_children(): void
+    {
+        $this->actingAsRole();
+
+        $selection = [];
+
+        foreach (range(1, 6) as $index) {
+            $selection[] = $this->child(110, ['child_id' => 'BULK-NEW-' . $index])->id;
+        }
+
+        foreach (range(1, 3) as $index) {
+            $id = 'BULK-ACTIVE-' . $index;
+            $selection[] = $this->child(112, ['child_id' => $id])->id;
+            FollowUpChild::factory()->create([
+                'id_number' => $id,
+                'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+            ]);
+        }
+
+        $selection[] = $this->child(114, ['child_id' => 'BULK-CLOSED-1'])->id;
+        FollowUpChild::factory()->create([
+            'id_number' => 'BULK-CLOSED-1',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+
+        $before = FollowUpChild::count();
+
+        $result = ReferralProcessor::refer($selection);
+
+        $this->assertSame(6, $result['referred']);
+        $this->assertSame(3, $result['skipped_active']);
+        $this->assertSame(1, $result['skipped_closed']);
+        $this->assertSame(4, $result['skipped']);
+        $this->assertSame(0, $result['failed']);
+
+        // Exactly six new records, and not one duplicate anywhere.
+        $this->assertSame($before + 6, FollowUpChild::count());
+
+        foreach (range(1, 6) as $index) {
+            $this->assertSame(1, FollowUpChild::where('id_number', 'BULK-NEW-' . $index)->count());
+        }
+
+        foreach (range(1, 3) as $index) {
+            $this->assertSame(1, FollowUpChild::where('id_number', 'BULK-ACTIVE-' . $index)->count());
+        }
+
+        $this->assertSame(1, FollowUpChild::where('id_number', 'BULK-CLOSED-1')->count());
+    }
+
+    /**
+     * The same selection confirmed twice - a double-click, or a replayed
+     * request. The second run writes nothing at all.
+     */
+    public function test_confirming_a_mixed_selection_twice_writes_nothing_the_second_time(): void
+    {
+        $this->actingAsRole();
+
+        $selection = [
+            $this->child(110, ['child_id' => 'TWICE-NEW'])->id,
+            $this->child(112, ['child_id' => 'TWICE-ACTIVE'])->id,
+            $this->child(114, ['child_id' => 'TWICE-CLOSED'])->id,
+        ];
+
+        FollowUpChild::factory()->create([
+            'id_number' => 'TWICE-ACTIVE',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+        FollowUpChild::factory()->create([
+            'id_number' => 'TWICE-CLOSED',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+
+        ReferralProcessor::refer($selection);
+
+        $episodes = FollowUpChild::count();
+        $visits = FollowUpChildVisit::count();
+
+        $second = ReferralProcessor::refer($selection);
+
+        $this->assertSame(0, $second['referred']);
+        $this->assertSame(2, $second['skipped_active'], 'The one just referred is now active.');
+        $this->assertSame(1, $second['skipped_closed']);
+
+        $this->assertSame($episodes, FollowUpChild::count());
+        $this->assertSame($visits, FollowUpChildVisit::count());
+        $this->assertSame(1, FollowUpChild::where('id_number', 'TWICE-NEW')->count());
+    }
+
+    /**
+     * A bulk run must not grow a lookup per skipped child either: the state
+     * of the whole selection is read in one query.
+     */
+    public function test_a_skipped_selection_does_not_query_once_per_child(): void
+    {
+        $this->actingAsRole();
+
+        $selection = [];
+
+        foreach (range(1, 20) as $index) {
+            $id = 'PERF-ACTIVE-' . $index;
+            $selection[] = $this->child(110, ['child_id' => $id])->id;
+            FollowUpChild::factory()->create([
+                'id_number' => $id,
+                'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+            ]);
+        }
+
+        \DB::enableQueryLog();
+        \DB::flushQueryLog();
+
+        $result = ReferralProcessor::refer($selection);
+
+        $selects = collect(\DB::getQueryLog())
+            ->filter(fn (array $query): bool => str_starts_with(strtolower(trim($query['query'])), 'select'))
+            ->count();
+
+        \DB::disableQueryLog();
+
+        $this->assertSame(20, $result['skipped_active']);
+        $this->assertLessThanOrEqual(
+            4,
+            $selects,
+            'The follow-up state of a selection is read in one query, not one per child.',
+        );
+    }
+
+    // =================================================================
+    // Reading the history of a case that will not be referred
+    // =================================================================
+
+    public function test_a_listed_child_carries_a_link_to_its_follow_up_record(): void
+    {
+        $this->actingAsRole();
+
+        $child = $this->child(110, ['child_id' => 'LINK-CLOSED']);
+
+        $episode = FollowUpChild::factory()->create([
+            'id_number' => 'LINK-CLOSED',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+
+        $row = $this->listedRow($child);
+
+        $this->assertSame($episode->getKey(), (int) $row->follow_up_child_id);
+        $this->assertNotNull(ReferralCenter::followUpUrl($row));
+    }
+
+    public function test_the_open_episode_wins_the_link_when_a_child_has_both(): void
+    {
+        $this->actingAsRole();
+
+        $child = $this->child(110, ['child_id' => 'LINK-BOTH']);
+
+        FollowUpChild::factory()->create([
+            'id_number' => 'LINK-BOTH',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+        $open = FollowUpChild::factory()->create([
+            'id_number' => 'LINK-BOTH',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+
+        $this->assertSame($open->getKey(), (int) $this->listedRow($child)->follow_up_child_id);
+
+        // And the same precedence in the bulk lookup the referral run uses.
+        $this->assertSame(
+            ['LINK-BOTH' => ReferralCandidates::STATE_OPEN],
+            ReferralCandidates::followUpStateForChildIds(['LINK-BOTH']),
+        );
+    }
+
+    public function test_a_child_with_no_episode_carries_no_link(): void
+    {
+        $this->actingAsRole();
+
+        $row = $this->listedRow($this->child(110, ['child_id' => 'LINK-NONE']));
+
+        $this->assertNull($row->follow_up_child_id);
+        $this->assertNull(ReferralCenter::followUpUrl($row));
+    }
+
+    // =================================================================
+    // The Referral Centre listing, per case
+    // =================================================================
+
+    public function test_the_default_listing_offers_only_the_children_with_no_follow_up(): void
+    {
+        $this->actingAsRole();
+
+        $pending = $this->child(110, ['child_id' => 'LIST-PENDING']);
+
+        $active = $this->child(110, ['child_id' => 'LIST-ACTIVE']);
+        FollowUpChild::factory()->create([
+            'id_number' => 'LIST-ACTIVE',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+
+        $closed = $this->child(110, ['child_id' => 'LIST-CLOSED']);
+        FollowUpChild::factory()->create([
+            'id_number' => 'LIST-CLOSED',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+
+        Livewire::test(ReferralCenter::class)
+            ->assertSuccessful()
+            ->assertCanSeeTableRecords([$pending])
+            ->assertCanNotSeeTableRecords([$active, $closed]);
+    }
+
+    /**
+     * A case that will not be referred offers its history instead, and a case
+     * that has none offers nothing.
+     */
+    public function test_the_history_action_is_offered_only_where_there_is_a_history(): void
+    {
+        $this->actingAsRole();
+
+        $pending = $this->child(110, ['child_id' => 'ACTION-PENDING']);
+
+        $active = $this->child(110, ['child_id' => 'ACTION-ACTIVE']);
+        FollowUpChild::factory()->create([
+            'id_number' => 'ACTION-ACTIVE',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+
+        Livewire::test(ReferralCenter::class)
+            ->filterTable('referral_status', null)
+            ->assertActionVisible(TestAction::make('view_follow_up')->table($active))
+            ->assertActionHidden(TestAction::make('view_follow_up')->table($pending));
+    }
+
+    /**
+     * Both decisions to leave a child alone are recorded in the existing
+     * activity log, in the same "referral" channel the referral itself uses.
+     */
+    public function test_skipping_a_case_is_recorded_in_the_activity_log(): void
+    {
+        $user = $this->actingAsRole();
+
+        $active = $this->child(110, ['child_id' => 'AUDIT-ACTIVE']);
+        FollowUpChild::factory()->create([
+            'id_number' => 'AUDIT-ACTIVE',
+            'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+        ]);
+
+        $closed = $this->child(110, ['child_id' => 'AUDIT-CLOSED']);
+        FollowUpChild::factory()->create([
+            'id_number' => 'AUDIT-CLOSED',
+            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+        ]);
+
+        ReferralProcessor::refer([$active->id, $closed->id], null, $user);
+
+        foreach ([
+            ReferralProcessor::OUTCOME_SKIPPED_ACTIVE => 'AUDIT-ACTIVE',
+            ReferralProcessor::OUTCOME_SKIPPED_CLOSED => 'AUDIT-CLOSED',
+        ] as $event => $childId) {
+            $entry = Activity::query()
+                ->where('log_name', 'referral')
+                ->where('event', $event)
+                ->latest('id')
+                ->first();
+
+            $this->assertNotNull($entry, "No [{$event}] entry was recorded.");
+            $this->assertSame($childId, $entry->properties['child_id'] ?? null);
+            $this->assertSame($user->getKey(), $entry->causer_id);
+        }
+    }
+
     // -----------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------
+
+    /**
+     * One child as the Referral Centre's own query selects it, carrying the
+     * status and the follow-up link the table reads off the row.
+     */
+    private function listedRow(Child $child): Child
+    {
+        return ReferralCandidates::overview()
+            ->whereKey($child->getKey())
+            ->select('children.*')
+            ->selectRaw(ReferralCandidates::statusCase() . ' as referral_status')
+            ->selectRaw(ReferralCandidates::followUpChildIdSql() . ' as follow_up_child_id')
+            ->firstOrFail();
+    }
 
     /**
      * A children sheet with the required columns filled, keyed child ID => MUAC.

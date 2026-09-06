@@ -448,7 +448,6 @@ class ChildResource extends Resource
                     ->maxLength(255),
                 \Filament\Forms\Components\Select::make('mother_marital_status')
                     ->label(__('fields.mother_marital_status'))
-                    ->required()
                     ->options([
                         // The keys are what the column stores; only the
                         // labels follow the panel's language.
