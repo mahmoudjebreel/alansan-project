@@ -61,6 +61,12 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
      * @param  array<string, int|float|string|null>  $totals
      * @param  array<int>  $monthStarts  row offsets, into $rows, where a month begins
      */
+    /** Day rows with each month's Total row folded in, built once. */
+    private ?array $dataRows = null;
+
+    /** Offsets, into dataRows(), of the rows that close a month. */
+    private array $monthTotalRows = [];
+
     public function __construct(
         private readonly string $sheet,
         private readonly array $rows,
@@ -76,7 +82,8 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
 
     /**
      * The whole grid: a blank first row, the header block, then one row per
-     * day and a closing Total row.
+     * day, a Total row closing each month, and the closing Total row for the
+     * whole period.
      *
      * @return array<int, array<int, int|float|string|null>>
      */
@@ -102,13 +109,117 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
             }
         }
 
-        foreach ($this->rows as $row) {
+        foreach ($this->dataRows() as $row) {
             $grid[] = $this->toCells($row, $columns);
         }
 
         $grid[] = $this->toCells($this->totals, $columns);
 
         return $grid;
+    }
+
+    /**
+     * The day rows with each month's own Total row appended after it.
+     *
+     * Built here rather than in the aggregation service, so the figures the
+     * page shows and the queries behind them are untouched: this is the file's
+     * own presentation of rows it was already given.
+     *
+     * @return array<int, array<string, int|float|string|null>>
+     */
+    private function dataRows(): array
+    {
+        if ($this->dataRows !== null) {
+            return $this->dataRows;
+        }
+
+        // A report built for a single month arrives with one month start, so
+        // the same walk serves both cases.
+        $starts = $this->monthStarts === [] ? [0] : $this->monthStarts;
+        $rows = [];
+        $offsets = [];
+
+        foreach ($starts as $index => $start) {
+            $end = $starts[$index + 1] ?? count($this->rows);
+            $month = array_slice($this->rows, $start, $end - $start);
+
+            if ($month === []) {
+                continue;
+            }
+
+            foreach ($month as $row) {
+                $rows[] = $row;
+            }
+
+            $offsets[] = count($rows);
+            $rows[] = $this->monthTotal($month);
+        }
+
+        $this->monthTotalRows = $offsets;
+
+        return $this->dataRows = $rows;
+    }
+
+    /**
+     * One month's Total row, summed from that month's own day rows.
+     *
+     * The stub keeps the month's name so the row reads on its own, and columns
+     * with no source stay null rather than becoming a zero the template would
+     * be read as a measurement.
+     *
+     * @param  array<int, array<string, int|float|string|null>>  $month
+     * @return array<string, int|float|string|null>
+     */
+    private function monthTotal(array $month): array
+    {
+        $averages = array_flip(MealReportLayout::averageColumns($this->sheet));
+        $total = [];
+
+        foreach (MealReportLayout::columns($this->sheet) as $key) {
+            if ($key === 'mba') {
+                $total[$key] = '';
+
+                continue;
+            }
+
+            if ($key === 'month') {
+                $total[$key] = $month[0]['month'] ?? '';
+
+                continue;
+            }
+
+            if ($key === 'day') {
+                $total[$key] = 'Total';
+
+                continue;
+            }
+
+            $values = array_filter(
+                array_column($month, $key),
+                fn ($value) => is_int($value) || is_float($value),
+            );
+
+            if ($values === []) {
+                $total[$key] = null;
+
+                continue;
+            }
+
+            // Averaging an average, exactly as the closing Total row does.
+            if (isset($averages[$key])) {
+                $measured = array_filter($values, fn ($value) => $value > 0);
+
+                $total[$key] = $measured === []
+                    ? 0
+                    : round(array_sum($measured) / count($measured), 1);
+
+                continue;
+            }
+
+            $total[$key] = array_sum($values);
+        }
+
+        return $total;
     }
 
     /**
@@ -140,7 +251,7 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
         $width = count($columns);
         $leafRow = MealReportLayout::LEAF_ROW[$this->sheet];
         $lastColumn = $sheet->getCellByColumnAndRow($width, 1)->getColumn();
-        $lastRow = $leafRow + count($this->rows) + 1;
+        $lastRow = $leafRow + count($this->dataRows()) + 1;
 
         foreach (MealReportLayout::merges($this->sheet) as [$row, $column, $rowEnd, $columnEnd]) {
             // A few header captions occupy a single cell; merging those would
@@ -210,6 +321,7 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
 
             $sheet->mergeCells("A{$lastRow}:C{$lastRow}");
 
+            $this->markMonthTotals($sheet, $firstDataRow, $lastColumn);
             $this->ruleOffMonths($sheet, $firstDataRow, $lastColumn);
         }
 
@@ -234,13 +346,32 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
      */
     private function ruleOffMonths(Worksheet $sheet, int $firstDataRow, string $lastColumn): void
     {
-        foreach (array_slice($this->monthStarts, 1) as $offset) {
-            $row = $firstDataRow + $offset;
+        // Each month now closes with its own Total row, so a month's first day
+        // has moved down by one row per month already written.
+        foreach (array_slice($this->monthTotalRows, 0, -1) as $offset) {
+            $row = $firstDataRow + $offset + 1;
 
             $sheet->getStyle("A{$row}:{$lastColumn}{$row}")
                 ->getBorders()
                 ->getTop()
                 ->setBorderStyle(Border::BORDER_MEDIUM);
+        }
+    }
+
+    /**
+     * Give every month's Total row the same weight as the closing one, so a
+     * reader can pick a single month's figures off the sheet without adding
+     * its days up by hand.
+     */
+    private function markMonthTotals(Worksheet $sheet, int $firstDataRow, string $lastColumn): void
+    {
+        foreach ($this->monthTotalRows as $offset) {
+            $row = $firstDataRow + $offset;
+
+            $sheet->getStyle("A{$row}:{$lastColumn}{$row}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F2F2F2']],
+            ]);
         }
     }
 }

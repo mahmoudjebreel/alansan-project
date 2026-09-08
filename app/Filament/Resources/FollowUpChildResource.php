@@ -51,6 +51,8 @@ class FollowUpChildResource extends Resource
             'defaulted' => __('fields.defaulted'),
             'discharge_to_opt' => __('fields.discharge_to_opt'),
             'discharge_to_other' => __('fields.discharge_to_other'),
+            'non_responded' => __('fields.non_responded'),
+            'referred_medical_inpt' => __('fields.referred_medical_inpt'),
             'died' => __('fields.died'),
             'under_follow_up' => __('fields.under_follow_up'),
         ];

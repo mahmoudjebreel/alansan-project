@@ -42,6 +42,8 @@ class FollowUpChild extends Model
         'defaulted',
         'discharge_to_opt',
         'discharge_to_other',
+        'non_responded',
+        'referred_medical_inpt',
         'died',
     ];
 

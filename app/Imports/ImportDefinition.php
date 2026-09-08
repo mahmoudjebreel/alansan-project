@@ -971,23 +971,28 @@ final class ImportDefinition
                         'Discharge to Other' => 'discharge_to_other',
                         'Discharged to Other' => 'discharge_to_other',
 
-                        // Three exits the sheets record that the option list
-                        // has no separate name for: a child referred out for a
-                        // medical reason, one who stopped responding to
-                        // treatment, and the catch-all the teams type. All
-                        // three leave the programme for somewhere else, which
-                        // is what "discharged to another entity" means here.
-                        // Read off a workbook that was actually submitted.
+                        // The catch-all the teams type when no named exit
+                        // fits. Read off a workbook that was actually
+                        // submitted.
                         'case discharged other' => 'discharge_to_other',
-                        'Referred For Medical Reason(inpt)' => 'discharge_to_other',
-                        'Referred for Medical Reason' => 'discharge_to_other',
-                        'Referred for Medical Reasons' => 'discharge_to_other',
-                        'محول لسبب طبي' => 'discharge_to_other',
-                        'Non Responed' => 'discharge_to_other',
-                        'Non Responded' => 'discharge_to_other',
-                        'Non Responder' => 'discharge_to_other',
-                        'Non-responder' => 'discharge_to_other',
-                        'غير مستجيب' => 'discharge_to_other',
+
+                        // A referral out for a medical reason and a child who
+                        // stopped responding to treatment each have their own
+                        // outcome now, so the spellings the sheets use land
+                        // there instead of being folded into "discharged to
+                        // another entity". The bracket is written with and
+                        // without a space in the workbooks.
+                        'Referred For Medical Reason (inpt)' => 'referred_medical_inpt',
+                        'Referred For Medical Reason(inpt)' => 'referred_medical_inpt',
+                        'Referred for Medical Reason' => 'referred_medical_inpt',
+                        'Referred for Medical Reasons' => 'referred_medical_inpt',
+                        'محول لسبب طبي' => 'referred_medical_inpt',
+
+                        'Non Responed' => 'non_responded',
+                        'Non Responded' => 'non_responded',
+                        'Non Responder' => 'non_responded',
+                        'Non-responder' => 'non_responded',
+                        'غير مستجيب' => 'non_responded',
 
                         'متوفى' => 'died',
                         'توفي' => 'died',

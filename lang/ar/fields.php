@@ -289,6 +289,8 @@ return [
     'defaulted' => 'منقطع',
     'discharge_to_opt' => 'تخريج إلى OPT',
     'discharge_to_other' => 'تخريج إلى جهة أخرى',
+    'non_responded' => 'غير مستجيب',
+    'referred_medical_inpt' => 'محول لسبب طبي (تنويم)',
     'died' => 'متوفى',
     'notes' => 'ملاحظات',
     'visits' => 'الزيارات',
