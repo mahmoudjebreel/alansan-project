@@ -32,6 +32,13 @@ use Throwable;
 
 class AdminPanelProvider extends PanelProvider
 {
+    /**
+     * The colour the panel is drawn in before an operator picks one.
+     *
+     * Matches the default SettingsSeeder writes, so a panel falling back to
+     * it looks the same as one reading the setting.
+     */
+    private const DEFAULT_PRIMARY_COLOR = '#10b981';
 
     public function panel(Panel $panel): Panel
     {
@@ -45,11 +52,11 @@ class AdminPanelProvider extends PanelProvider
             ->brandName(fn (): string => self::siteName())
             // Both fall back to what the panel shipped with when the operator
             // has not uploaded anything, so a fresh install still has a mark.
-            ->brandLogo(fn (): ?string => app(GeneralSettings::class)->logoUrl())
+            ->brandLogo(fn (): ?string => self::settings()?->logoUrl())
             ->brandLogoHeight('2.5rem')
-            ->favicon(fn (): string => app(GeneralSettings::class)->faviconUrl() ?? secure_asset('favicon.svg'))
+            ->favicon(fn (): string => self::settings()?->faviconUrl() ?? secure_asset('favicon.svg'))
             ->colors(fn (): array => [
-                'primary' => Color::hex(app(GeneralSettings::class)->primary_color),
+                'primary' => Color::hex(self::primaryColor()),
                 'danger' => Color::Rose,
                 'gray' => Color::Slate,
                 'info' => Color::Sky,
@@ -121,14 +128,14 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::SIMPLE_PAGE_START,
                 fn (): string => view('filament.auth.login-brand', [
                     'siteName' => self::siteName(),
-                    'tagline' => app(GeneralSettings::class)->login_tagline,
-                    'logoUrl' => app(GeneralSettings::class)->logoUrl(),
+                    'tagline' => self::settings()?->login_tagline,
+                    'logoUrl' => self::settings()?->logoUrl(),
                 ])->render()
             )
             ->renderHook(
                 PanelsRenderHook::BODY_END,
                 fn (): string => view('filament.scripts.dashboard-alerts', [
-                    'primaryColor' => app(GeneralSettings::class)->primary_color,
+                    'primaryColor' => self::primaryColor(),
                     'keepAliveUrl' => route('session.keep-alive'),
                     'keepAliveSeconds' => self::keepAliveSeconds(),
                     // The referral prompt classifies the reading in the
@@ -173,23 +180,46 @@ class AdminPanelProvider extends PanelProvider
     }
 
     /**
+     * The operator-editable settings, or null when they cannot be read.
+     *
+     * Everything the panel is branded and coloured with lives in the database,
+     * and it is read while the panel is being defined - which also happens
+     * during `migrate`, on a database that has no settings table yet, and on
+     * any environment where the settings migrations have not been run. A
+     * missing row would otherwise take down every page of the panel, the
+     * sign-in screen included, leaving no way in to put it right. Each caller
+     * falls back to what the panel ships with instead.
+     *
+     * Note that spatie's settings load lazily: nothing reaches the database
+     * until a property is read, so the read has to happen inside the try.
+     */
+    private static function settings(): ?GeneralSettings
+    {
+        try {
+            $settings = app(GeneralSettings::class);
+            $settings->site_name;
+
+            return $settings;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** The colour the panel is drawn in, from the settings page. */
+    private static function primaryColor(): string
+    {
+        return self::settings()?->primary_color ?: self::DEFAULT_PRIMARY_COLOR;
+    }
+
+    /**
      * The theme the panel opens on, from the settings page.
      *
-     * Filament takes the mode itself rather than a closure, so this is read
-     * while the panel is being defined - which also happens during `migrate`
-     * on a database that has no settings table yet. An unreadable setting, or
-     * one holding an unrecognised value, falls back to following the operating
-     * system rather than taking the whole application down.
+     * An unreadable setting, or one holding an unrecognised value, follows the
+     * operating system.
      */
     private static function themeMode(): ThemeMode
     {
-        try {
-            $mode = app(GeneralSettings::class)->default_theme;
-        } catch (Throwable) {
-            return ThemeMode::System;
-        }
-
-        return match ($mode) {
+        return match (self::settings()?->default_theme) {
             'light' => ThemeMode::Light,
             'dark' => ThemeMode::Dark,
             default => ThemeMode::System,
@@ -206,7 +236,7 @@ class AdminPanelProvider extends PanelProvider
     private static function siteName(): string
     {
         $fallback = __('ui.site.fallback_name');
-        $siteName = app(GeneralSettings::class)->site_name;
+        $siteName = self::settings()?->site_name ?? '';
 
         if (str_contains($siteName, '╪') || str_contains($siteName, '┘')) {
             return $fallback;

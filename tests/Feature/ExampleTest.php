@@ -8,12 +8,13 @@ use Tests\TestCase;
 class ExampleTest extends TestCase
 {
     /**
-     * The root URL redirects guests to the Filament login page.
+     * The root URL sends visitors into the panel, which turns a guest away at
+     * its own door rather than the application deciding that here.
      */
-    public function test_the_application_redirects_guests_to_login(): void
+    public function test_the_application_redirects_visitors_to_the_panel(): void
     {
         $response = $this->get('/');
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect('/admin');
     }
 }
