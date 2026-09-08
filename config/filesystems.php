@@ -85,7 +85,12 @@ return [
             'url' => '/uploads',
             'visibility' => 'public',
             'throw' => false,
-            'report' => false,
+            // A write that fails is reported. It still returns false rather
+            // than raising - a missing image must not cost the page it sits
+            // on - but silence was worse: an upload rejected by the bucket
+            // reached the operator as "failed to upload" and reached the log
+            // as nothing at all, leaving no way to find out why.
+            'report' => true,
         ],
 
         's3' => [
@@ -98,7 +103,10 @@ return [
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
-            'report' => false,
+            // Reported for the reason given on the uploads disk above: a
+            // bucket that refuses a write has a reason, and it is the only
+            // thing that says why an upload failed.
+            'report' => true,
         ],
 
     ],
