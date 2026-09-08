@@ -17,6 +17,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Uploads Disk
+    |--------------------------------------------------------------------------
+    |
+    | Where files uploaded through the panel are kept: the logo, the favicon
+    | and user avatars, and the file Livewire holds between the request that
+    | uploads it and the one that reads it.
+    |
+    | On one machine that can be the local disk under public/uploads, which
+    | needs no symlink and no external service. A serverless host has neither:
+    | its filesystem is read-only and its temporary directory belongs to one
+    | invocation, so a file written by the upload request is not there for the
+    | request that stores it. Point this at "s3" there - any S3-compatible
+    | bucket, Cloudflare R2 included - and both halves of an upload see the
+    | same file.
+    |
+    | @see \App\Support\PublicUploads
+    |
+    */
+
+    'uploads_disk' => env('UPLOADS_DISK', 'uploads'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |

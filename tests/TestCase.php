@@ -2,7 +2,10 @@
 
 namespace Tests;
 
+use App\Support\PublicUploads;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
@@ -32,6 +35,23 @@ abstract class TestCase extends BaseTestCase
         parent::setUp();
 
         $this->guardAgainstRunningOnARealDatabase();
+    }
+
+    /**
+     * Fake the uploads disk without losing the address it is served from.
+     *
+     * Storage::fake() replaces a disk's whole configuration, so a disk faked
+     * plainly answers url() with Laravel's default /storage prefix instead of
+     * the one config gives it - and an assertion about an uploaded file's URL
+     * would then be describing the fake rather than the application.
+     */
+    protected function fakeUploadsDisk(): Filesystem
+    {
+        $disk = PublicUploads::disk();
+
+        return Storage::fake($disk, [
+            'url' => config("filesystems.disks.{$disk}.url"),
+        ]);
     }
 
     private function guardAgainstRunningOnARealDatabase(): void

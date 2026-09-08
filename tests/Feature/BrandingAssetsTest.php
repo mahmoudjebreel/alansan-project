@@ -66,7 +66,7 @@ class BrandingAssetsTest extends TestCase
 
     public function test_a_logo_uploaded_on_the_settings_page_is_stored_and_resolvable(): void
     {
-        Storage::fake(PublicUploads::DISK);
+        $this->fakeUploadsDisk();
         $this->actingAsSuperAdmin();
 
         Livewire::test(ManageSettings::class)
@@ -77,14 +77,14 @@ class BrandingAssetsTest extends TestCase
         $settings = app(GeneralSettings::class)->refresh();
 
         $this->assertStringStartsWith('branding/', $settings->logo_path);
-        Storage::disk(PublicUploads::DISK)->assertExists($settings->logo_path);
+        Storage::disk(PublicUploads::disk())->assertExists($settings->logo_path);
         $this->assertNotNull($settings->logoUrl());
     }
 
     public function test_the_sign_in_page_shows_the_uploaded_logo(): void
     {
-        Storage::fake(PublicUploads::DISK);
-        Storage::disk(PublicUploads::DISK)->put('branding/logo.png', 'not-really-a-png');
+        $this->fakeUploadsDisk();
+        Storage::disk(PublicUploads::disk())->put('branding/logo.png', 'not-really-a-png');
 
         $settings = app(GeneralSettings::class);
         $settings->logo_path = 'branding/logo.png';
@@ -110,7 +110,7 @@ class BrandingAssetsTest extends TestCase
 
     public function test_a_path_pointing_at_nothing_resolves_to_null_rather_than_a_broken_image(): void
     {
-        Storage::fake(PublicUploads::DISK);
+        $this->fakeUploadsDisk();
 
         $settings = app(GeneralSettings::class);
         $settings->logo_path = 'branding/deleted-by-hand.png';

@@ -23,7 +23,7 @@ class ProfileAvatarHydrationTest extends TestCase
 
     public function test_saved_avatar_is_restored_into_the_upload_field_on_reopen(): void
     {
-        Storage::fake(PublicUploads::DISK);
+        $this->fakeUploadsDisk();
 
         $user = User::factory()->create(['avatar' => null]);
         $this->actingAs($user);
@@ -37,7 +37,7 @@ class ProfileAvatarHydrationTest extends TestCase
 
         $this->assertNotNull($stored);
         $this->assertStringStartsWith('avatars/', $stored);
-        Storage::disk(PublicUploads::DISK)->assertExists($stored);
+        Storage::disk(PublicUploads::disk())->assertExists($stored);
 
         // Re-open the page: the field must be hydrated with the raw path.
         Livewire::test(EditProfile::class)
@@ -46,7 +46,7 @@ class ProfileAvatarHydrationTest extends TestCase
 
     public function test_uploading_again_replaces_the_previous_file_and_still_rehydrates(): void
     {
-        Storage::fake(PublicUploads::DISK);
+        $this->fakeUploadsDisk();
 
         $user = User::factory()->create(['avatar' => null]);
         $this->actingAs($user);
@@ -68,8 +68,8 @@ class ProfileAvatarHydrationTest extends TestCase
         $second = $user->refresh()->avatar;
 
         $this->assertNotSame($first, $second);
-        Storage::disk(PublicUploads::DISK)->assertMissing($first);
-        Storage::disk(PublicUploads::DISK)->assertExists($second);
+        Storage::disk(PublicUploads::disk())->assertMissing($first);
+        Storage::disk(PublicUploads::disk())->assertExists($second);
 
         Livewire::test(EditProfile::class)
             ->assertFormSet(fn (array $state) => in_array($second, (array) $state['avatar'], true));
@@ -84,8 +84,8 @@ class ProfileAvatarHydrationTest extends TestCase
      */
     public function test_avatar_url_is_root_relative_and_needs_no_symlink(): void
     {
-        Storage::fake(PublicUploads::DISK);
-        Storage::disk(PublicUploads::DISK)->put('avatars/example.jpg', 'x');
+        $this->fakeUploadsDisk();
+        Storage::disk(PublicUploads::disk())->put('avatars/example.jpg', 'x');
 
         $user = User::factory()->create(['avatar' => 'avatars/example.jpg']);
 
@@ -94,7 +94,7 @@ class ProfileAvatarHydrationTest extends TestCase
 
     public function test_a_missing_avatar_file_has_no_url_at_all(): void
     {
-        Storage::fake(PublicUploads::DISK);
+        $this->fakeUploadsDisk();
 
         $user = User::factory()->create(['avatar' => 'avatars/deleted-by-hand.jpg']);
 

@@ -44,7 +44,7 @@ class EditProfile extends BaseEditProfile
             ->label(__('ui.profile.avatar'))
             ->image()
             ->avatar()
-            ->disk(PublicUploads::DISK)
+            ->disk(PublicUploads::disk())
             ->directory('avatars')
             ->visibility('public')
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
@@ -68,7 +68,7 @@ class EditProfile extends BaseEditProfile
         $newAvatar = $data['avatar'] ?? null;
 
         if ($currentAvatar && $currentAvatar !== $newAvatar) {
-            Storage::disk(PublicUploads::DISK)->delete($currentAvatar);
+            Storage::disk(PublicUploads::disk())->delete($currentAvatar);
         }
 
         return $data;
