@@ -99,7 +99,6 @@ class ManageSettings extends Page implements HasForms
                                 ->image()
                                 ->disk(PublicUploads::disk())
                                 ->directory('branding')
-                                ->visibility('public')
                                 ->imagePreviewHeight('80')
                                 ->acceptedFileTypes(['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp'])
                                 ->maxSize(2048),
@@ -109,7 +108,6 @@ class ManageSettings extends Page implements HasForms
                                 ->image()
                                 ->disk(PublicUploads::disk())
                                 ->directory('branding')
-                                ->visibility('public')
                                 ->imagePreviewHeight('48')
                                 ->acceptedFileTypes(['image/svg+xml', 'image/png', 'image/x-icon', 'image/vnd.microsoft.icon'])
                                 ->maxSize(1024),

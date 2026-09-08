@@ -46,7 +46,6 @@ class EditProfile extends BaseEditProfile
             ->avatar()
             ->disk(PublicUploads::disk())
             ->directory('avatars')
-            ->visibility('public')
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
             ->maxSize(2048);
     }

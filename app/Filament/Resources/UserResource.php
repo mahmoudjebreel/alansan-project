@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
+use App\Support\PublicUploads;
 use Filament\Forms;
 use Filament\Schemas\Schema;
 use Filament\Resources\Resource;
@@ -84,9 +85,14 @@ class UserResource extends Resource
                 ->label(__('ui.users.avatar'))
                 ->image()
                 ->avatar()
-                ->disk('public')
+                // Same disk the operator's own profile page writes to. It
+                // used to be the `public` disk, which is only reachable
+                // through a symlink this deployment has no way to create, so
+                // an avatar set from here was stored and then never shown.
+                // Files still sitting on that disk keep resolving - see
+                // PublicUploads::url().
+                ->disk(PublicUploads::disk())
                 ->directory('avatars')
-                ->visibility('public')
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(2048),
             \Filament\Forms\Components\Select::make('roles')
