@@ -109,6 +109,32 @@ return [
             'report' => true,
         ],
 
+        /*
+         * The same bucket as the s3 disk, written by the application rather
+         * than by the browser.
+         *
+         * The driver name is the whole difference. Livewire reads it to decide
+         * how an upload travels: on "s3" it hands the browser a pre-signed URL
+         * and the file goes straight to the bucket. Point this at a bucket
+         * that only accepts writes from a server - Supabase Storage, whose S3
+         * credentials are server-side only - and that upload fails out in the
+         * browser, with nothing about it reaching the server log.
+         *
+         * @see \App\Providers\AppServiceProvider::registerServerSideBucketDriver()
+         */
+        'bucket' => [
+            'driver' => 's3-server-side',
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_DEFAULT_REGION'),
+            'bucket' => env('AWS_BUCKET'),
+            'url' => env('AWS_URL'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => true,
+        ],
+
     ],
 
     /*

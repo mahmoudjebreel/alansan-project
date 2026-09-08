@@ -15,6 +15,7 @@ use Filament\Support\Facades\FilamentTimezone;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Component;
@@ -41,6 +42,8 @@ class AppServiceProvider extends ServiceProvider
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
         }
+
+        $this->registerServerSideBucketDriver();
 
         // Global dashboard stylesheet (e.g. hiding the native number-input
         // spinner arrows). Registered once here so it loads on every Filament
@@ -123,6 +126,32 @@ class AppServiceProvider extends ServiceProvider
             \App\Events\ExcelActionOccurred::class,
             [\App\Listeners\RecordReferralBatch::class, 'onExcelAction'],
         );
+    }
+
+    /**
+     * An S3 bucket the application writes to itself.
+     *
+     * It is Laravel's own S3 driver under another name, and the name is the
+     * entire point. Livewire reads a disk's driver to decide how an upload
+     * travels: seeing "s3" it hands the browser a pre-signed URL and the file
+     * goes straight from the browser to the bucket, never passing through the
+     * application at all. That suits a bucket built to take uploads from
+     * browsers. Supabase Storage is not one - its S3 credentials are
+     * documented as server-side only, and the pre-signed request Livewire
+     * builds carries an ACL header that endpoint does not implement - so an
+     * upload failed out in the browser, which is why nothing about it ever
+     * reached the server log.
+     *
+     * Under this name the upload goes to the application as an ordinary
+     * request and the application writes it to the bucket. The trade is that
+     * the file now passes through the server, so it is bounded by whatever
+     * request body limit the host imposes.
+     */
+    private function registerServerSideBucketDriver(): void
+    {
+        Storage::extend('s3-server-side', function ($app, array $config) {
+            return Storage::createS3Driver($config);
+        });
     }
 
     /**
