@@ -52,10 +52,118 @@ final class ChildFollowUpTransfer
             return null;
         }
 
+        // A child whose previous episode closed with an outcome that allows
+        // it is the same child coming back: the new episode is a readmission
+        // and says so. After any other closed outcome the episode opens as a
+        // first admission, exactly as it always did. The closed episode is
+        // only read here, never written.
+        $previous = FollowUpChild::readmittableEpisodeFor($child->child_id);
+
+        return static::open($child, $fi, $previous);
+    }
+
+    /**
+     * Readmission from the Referral Centre: a new episode for a screened
+     * child whose every episode on file is closed.
+     *
+     * The same transfer as refer(), reached only by a person choosing
+     * "Readmission" for one child. It refuses - returns null - when there is
+     * no closed episode to follow on from, when one is still open, or when
+     * the reading is not one the programme admits on; nothing is written in
+     * any of those cases and the closed history is not touched in any case.
+     */
+    public static function readmit(Child $child): ?FollowUpChild
+    {
+        $fi = MuacClassifier::classify($child->muac_mm);
+
+        if (! MuacClassifier::isMalnourished($fi)) {
+            return null;
+        }
+
+        if (static::hasOpenEpisode($child->child_id)) {
+            return null;
+        }
+
+        // Only a closed episode whose outcome allows a readmission qualifies.
+        $previous = FollowUpChild::readmittableEpisodeFor($child->child_id);
+
+        if ($previous === null) {
+            return null;
+        }
+
+        return static::open($child, $fi, $previous);
+    }
+
+    /**
+     * Readmission from the Follow Up Child module itself: a new episode
+     * opened from a closed one, for a child who came back without passing
+     * through a Children screening first.
+     *
+     * The identity fields are copied from the closed record - it is the same
+     * child - and the reading entered becomes visit 1 of the new episode,
+     * exactly as a screening does. The closed record is read and never
+     * written: it keeps its outcome, its discharge date and every visit.
+     *
+     * @param  array{admission_date?: mixed, visit_date?: mixed, muac: mixed}  $data
+     */
+    public static function readmitFromEpisode(FollowUpChild $previous, array $data): ?FollowUpChild
+    {
+        if (! $previous->canBeReadmitted()) {
+            return null;
+        }
+
+        $fi = MuacClassifier::classify($data['muac'] ?? null);
+
+        if (! MuacClassifier::isMalnourished($fi)) {
+            return null;
+        }
+
+        $admissionDate = static::date($data['admission_date'] ?? null) ?? Carbon::today();
+        $visitDate = static::date($data['visit_date'] ?? null) ?? $admissionDate;
+
+        return DB::transaction(function () use ($previous, $fi, $admissionDate, $visitDate, $data): FollowUpChild {
+            $followUpChild = FollowUpChild::create([
+                'id_number' => $previous->id_number,
+                'child_name' => $previous->child_name,
+                'sex' => $previous->sex,
+                'dob' => $previous->dob,
+                'age' => FollowUpChild::formatCurrentAge($previous->dob),
+                'mobile_number' => $previous->mobile_number,
+                'shelter_name' => $previous->shelter_name,
+                'governorate' => $previous->governorate ?: 'gaza',
+                'causes_of_admission' => 'malnutrition',
+                'admitted_with' => $fi,
+                'admission_type' => FollowUpChild::ADMISSION_READMISSION,
+                'admission_date' => $admissionDate,
+                'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
+                'discharge_date' => null,
+                'source_child_visit_id' => null,
+                'previous_follow_up_child_id' => $previous->getKey(),
+            ]);
+
+            $followUpChild->visits()->create([
+                'visit_number' => 1,
+                'visit_date' => $visitDate,
+                'muac' => $data['muac'],
+            ]);
+
+            return $followUpChild;
+        });
+    }
+
+    /**
+     * Write the episode and its first visit, inside one transaction.
+     *
+     * With a closed episode to follow on from, the row is a readmission and
+     * carries the link; otherwise it is a first admission. Either way the
+     * previous record, if any, is never written.
+     */
+    private static function open(Child $child, string $fi, ?FollowUpChild $previous): FollowUpChild
+    {
         $readingDate = static::date($child->date_of_reporting) ?? Carbon::today();
         $dob = static::date($child->date_of_birth);
 
-        return DB::transaction(function () use ($child, $fi, $readingDate, $dob): FollowUpChild {
+        return DB::transaction(function () use ($child, $fi, $readingDate, $dob, $previous): FollowUpChild {
             $followUpChild = FollowUpChild::create([
                 'id_number' => $child->child_id,
                 'child_name' => $child->name,
@@ -68,10 +176,14 @@ final class ChildFollowUpTransfer
                 // Fixed by the rule that produced this admission.
                 'causes_of_admission' => 'malnutrition',
                 'admitted_with' => $fi,
+                'admission_type' => $previous
+                    ? FollowUpChild::ADMISSION_READMISSION
+                    : FollowUpChild::ADMISSION_NEW,
                 'admission_date' => Carbon::today(),
                 'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
                 'discharge_date' => null,
                 'source_child_visit_id' => $child->getKey(),
+                'previous_follow_up_child_id' => $previous?->getKey(),
             ]);
 
             $followUpChild->visits()->create([

@@ -272,20 +272,51 @@
             return left === right;
         }
 
+        /**
+         * Where the child stands in the follow-up module, as the server
+         * reported it when the child ID was checked. A closed episode means
+         * a new one would be a readmission, and the prompt says so.
+         */
+        function followUpHistoryFor(component) {
+            const history = window.dashboardFollowUpHistory;
+
+            if (! history) {
+                return null;
+            }
+
+            const currentId = String(component.get("data.child_id") ?? "").trim();
+
+            return String(history.child_id ?? "").trim() === currentId ? history : null;
+        }
+
         function ask(form, component, input, fi) {
             const t = dashboardReferralText;
             const accent = fi === "SAM" ? "#dc2626" : "#d97706";
+            const history = followUpHistoryFor(component);
+            // A readmission only after an outcome that allows one; a closed
+            // episode on its own is not enough, and the server says which.
+            const readmission = history !== null && history.state === "closed" && history.readmission === true;
+
+            let historyHtml = "";
+
+            if (readmission) {
+                historyHtml = window.dashboardDialogRow(t.previous_outcome, history.outcome ?? "-", "#6b7280")
+                    + window.dashboardDialogRow(t.closed_on, history.discharge_date ?? "-", "#6b7280");
+            }
 
             return Swal.fire({
-                title: fi === "SAM" ? t.title_sam : t.title_mam,
+                title: readmission
+                    ? t.readmission_title
+                    : (fi === "SAM" ? t.title_sam : t.title_mam),
                 html: window.dashboardDialogBody(
                     window.dashboardDialogRow(t.child, childName(form, component), "#2563eb")
-                    + window.dashboardDialogRow(t.muac, `${input.value} ${t.mm}`, accent)
-                    + `<p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; ${dashboardStartBorder}: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">${t.question}</p>`
+                    + window.dashboardDialogRow(t.muac, `${input.value} ${t.mm} (${fi})`, accent)
+                    + historyHtml
+                    + `<p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; ${dashboardStartBorder}: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">${readmission ? t.readmission_question : t.question}</p>`
                 ),
                 icon: "warning",
                 showCancelButton: true,
-                confirmButtonText: t.confirm,
+                confirmButtonText: readmission ? t.readmission_confirm : t.confirm,
                 cancelButtonText: t.cancel,
                 confirmButtonColor: "#dc2626",
                 cancelButtonColor: "#6b7280",
@@ -391,6 +422,14 @@
         }, true);
     })();
 
+    // The Children form reports where the child stands in the follow-up
+    // module every time the child ID is checked. Kept for the referral prompt
+    // above, which turns into a readmission prompt when the episode on file
+    // is closed.
+    window.addEventListener("follow-up-history-known", event => {
+        window.dashboardFollowUpHistory = Array.isArray(event.detail) ? event.detail[0] : event.detail;
+    });
+
     window.addEventListener("show-duplicate-visit-alert", event => {
         const detail = Array.isArray(event.detail) ? event.detail[0] : event.detail;
         const t = dashboardText.duplicate_visit;
@@ -399,6 +438,11 @@
         let statusHtml = "";
         if (detail.last_status_type) {
             statusHtml = window.dashboardDialogRow(t.last_status_type, detail.last_status_type, "#7c3aed");
+        }
+        // The Children module adds the child's follow-up episode on file,
+        // open or closed, so a closed one is never mistaken for a new child.
+        if (detail.follow_up_state) {
+            statusHtml += window.dashboardDialogRow(t.follow_up_state, detail.follow_up_state, "#d97706");
         }
         let warningHtml = "";
         if (detail.visit_type_warning) {

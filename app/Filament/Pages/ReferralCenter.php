@@ -6,6 +6,7 @@ use App\Filament\Resources\FollowUpChildResource;
 use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Models\ReferralBatch;
+use App\Support\ChildFollowUpTransfer;
 use App\Support\MuacClassifier;
 use App\Support\Referral\ReferralCandidates;
 use App\Support\Referral\ReferralProcessor;
@@ -317,6 +318,33 @@ class ReferralCenter extends Page implements HasTable
                     ->url(fn (Child $record): ?string => static::followUpUrl($record))
                     ->openUrlInNewTab()
                     ->visible(fn (Child $record): bool => static::followUpUrl($record) !== null),
+                // The same child, back with a SAM or MAM reading after a
+                // closed episode. The bulk referral above leaves these rows
+                // alone on purpose; this is the one-child, one-decision way
+                // to open a NEW episode for them, marked as a readmission and
+                // linked to the closed one. The closed record is not touched.
+                Action::make('readmit')
+                    ->label(__('fields.readmission'))
+                    ->icon('heroicon-o-arrow-path-rounded-square')
+                    ->color('warning')
+                    ->authorize(fn (): bool => static::canRefer())
+                    // Offered only when the closed episode ended with one of
+                    // the outcomes that allow a readmission. Being closed is
+                    // not the test: a cured, defaulted, non-responded or
+                    // deceased child is listed here and offered nothing.
+                    ->visible(fn (Child $record): bool => static::canRefer()
+                        && static::statusOf($record) === ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED
+                        && FollowUpChild::readmittableEpisodeFor($record->child_id) !== null)
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-arrow-path-rounded-square')
+                    ->modalHeading(fn (Child $record): string => __('ui.readmission.heading', [
+                        'name' => $record->name,
+                    ]))
+                    ->modalDescription(fn (Child $record): string => static::readmissionDescription($record))
+                    ->modalSubmitActionLabel(__('ui.readmission.submit'))
+                    ->action(function (Child $record): void {
+                        $this->readmit($record);
+                    }),
             ])
             ->bulkActions([
                 BulkAction::make('refer')
@@ -354,6 +382,103 @@ class ReferralCenter extends Page implements HasTable
 
         return ($user?->can('children.refer') ?? false)
             && ($user?->can('create', FollowUpChild::class) ?? false);
+    }
+
+    /**
+     * What the readmission dialog says about the closed episode it follows:
+     * the child is known, how their last episode ended and when, and that a
+     * new episode is what will be opened.
+     */
+    public static function readmissionDescription(Child $record): string
+    {
+        $previous = FollowUpChild::latestClosedEpisodeFor($record->child_id);
+
+        $lines = [
+            __('ui.readmission.child_line', ['name' => $record->name, 'id' => $record->child_id]),
+        ];
+
+        if ($previous) {
+            $lines[] = __('ui.readmission.outcome_line', [
+                'outcome' => __('fields.' . $previous->discharge_outcome),
+                'date' => $previous->discharge_date?->format('Y-m-d') ?? '-',
+            ]);
+            $lines[] = __('ui.readmission.visits_line', ['count' => $previous->visits()->count()]);
+        }
+
+        $lines[] = __('ui.readmission.reading_line', [
+            'muac' => $record->muac_mm,
+            'fi' => MuacClassifier::classify($record->muac_mm),
+        ]);
+        $lines[] = __('ui.readmission.unchanged_line');
+
+        return implode(' ', $lines);
+    }
+
+    /**
+     * Open a readmission for one child and say what happened.
+     *
+     * Everything is re-checked against the database at this moment by the
+     * transfer itself - a closed episode to follow on from, none open, a
+     * reading the programme admits on - so a stale row cannot open anything.
+     */
+    private function readmit(Child $record): void
+    {
+        abort_unless(static::canRefer(), 403);
+
+        try {
+            $followUpChild = ChildFollowUpTransfer::readmit($record);
+        } catch (Throwable $e) {
+            report($e);
+
+            $followUpChild = null;
+        }
+
+        if (! $followUpChild instanceof FollowUpChild) {
+            Notification::make()
+                ->title(__('ui.readmission.not_possible'))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        ReferralCandidates::forgetSummaries();
+
+        // The same audit trail the bulk referral writes, with the decision
+        // named for what it is.
+        try {
+            activity('referral')
+                ->performedOn($followUpChild)
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'child_record_id' => $record->getKey(),
+                    'child_id' => $record->child_id,
+                    'child_name' => $record->name,
+                    'classification' => $followUpChild->admitted_with,
+                    'previous_follow_up_child_id' => $followUpChild->previous_follow_up_child_id,
+                    'referral_batch_id' => $this->currentBatch()?->getKey(),
+                ])
+                ->event('readmitted')
+                ->log('Child readmitted to follow-up');
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        Notification::make()
+            ->title(__('ui.readmission.done_title'))
+            ->body(__('ui.readmission.done_body', [
+                'name' => $followUpChild->child_name,
+                'fi' => $followUpChild->admitted_with,
+            ]))
+            ->icon('heroicon-o-arrow-path-rounded-square')
+            ->success()
+            ->actions([
+                Action::make('open')
+                    ->label(__('fields.open_follow_up_record'))
+                    ->url(FollowUpChildResource::getUrl('edit', ['record' => $followUpChild]))
+                    ->button(),
+            ])
+            ->send();
     }
 
     /**

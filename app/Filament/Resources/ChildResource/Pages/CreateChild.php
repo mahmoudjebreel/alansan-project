@@ -94,9 +94,12 @@ class CreateChild extends CreateRecord
             return;
         }
 
+        // A child back after a closed episode was readmitted, and is told so.
+        $readmitted = $followUpChild->isReadmission();
+
         Notification::make()
-            ->title(__('fields.referred_to_follow_up_title'))
-            ->body(__('fields.referred_to_follow_up_body', [
+            ->title(__($readmitted ? 'fields.readmitted_to_follow_up_title' : 'fields.referred_to_follow_up_title'))
+            ->body(__($readmitted ? 'fields.readmitted_to_follow_up_body' : 'fields.referred_to_follow_up_body', [
                 'name' => $child->name,
                 'fi' => $followUpChild->admitted_with,
             ]))

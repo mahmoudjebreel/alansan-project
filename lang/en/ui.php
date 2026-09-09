@@ -189,6 +189,43 @@ return [
         'edit_referred_title' => 'Referred to child follow-up',
         'edit_referred_body' => 'The change to :name was saved in Children, and a follow-up episode was opened because the new reading came back :fi.',
         'already_open' => 'The change was saved. This child already has an open follow-up episode, so no new one was opened.',
+        // The same prompt when the child's previous episode is closed: a new
+        // episode is a readmission, and is named as one before it is opened.
+        'readmission_title' => '⚠️ Readmission: this child has a closed follow-up case',
+        'previous_outcome' => 'Previous outcome',
+        'closed_on' => 'Closed on',
+        'readmission_question' => 'Open a NEW follow-up case for this child as a readmission? The previous closed case and its visits stay exactly as they are.',
+        'readmission_confirm' => 'Yes, readmission',
+    ],
+
+    // -----------------------------------------------------------------
+    // Child identity across the Children and Follow Up Child modules
+    // -----------------------------------------------------------------
+    'follow_up_identity' => [
+        'known_from_follow_up' => 'Known from a follow-up case',
+        'open' => 'Active follow-up case',
+        'closed' => 'Closed follow-up case: :outcome (:date)',
+    ],
+
+    // -----------------------------------------------------------------
+    // Readmission dialog (Follow Up Children and Referral Centre)
+    // -----------------------------------------------------------------
+    'readmission' => [
+        'heading' => 'Readmission: :name',
+        'description' => 'This child already exists and their previous follow-up case is closed. A NEW follow-up case will be opened as a readmission, starting from visit 1. The closed case, its outcome and its visits are not changed.',
+        'previous_case' => 'Previous case',
+        'child_line' => 'Child: :name (ID :id).',
+        'outcome_line' => 'Previous case closed as: :outcome (:date).',
+        'visits_line' => 'Visits recorded in the previous case: :count.',
+        'reading_line' => 'Current screening: MUAC :muac mm (:fi).',
+        'unchanged_line' => 'The previous case will remain closed and unchanged.',
+        'first_visit_date' => 'Visit 1 date',
+        'muac_hint' => 'The reading the child is readmitted on. It becomes visit 1 of the new case.',
+        'muac_not_admissible' => 'The programme admits on SAM or MAM only. This reading is Normal.',
+        'submit' => 'Confirm readmission',
+        'not_possible' => 'Readmission is not possible: the child has an open follow-up case, or has no closed one to follow.',
+        'done_title' => 'Readmitted to Follow Up Children',
+        'done_body' => 'A new follow-up case was opened for :name as a readmission (:fi). The previous case is unchanged.',
     ],
 
     // -----------------------------------------------------------------
@@ -213,6 +250,7 @@ return [
             'last_visit_date' => 'Last visit date',
             'last_visit_type' => 'Previous visit type',
             'last_status_type' => 'Previous status',
+            'follow_up_state' => 'Follow-up case on file',
             'confirm' => 'Record it anyway',
             'skip' => 'Skip',
         ],

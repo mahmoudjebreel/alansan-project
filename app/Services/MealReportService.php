@@ -56,8 +56,9 @@ class MealReportService
                 $cmam[] = $key;
             }
 
-            // discharge_outcome has no value for either of these.
-            if (str_contains($key, '_dis_no_response_') || str_contains($key, '_dis_unknown_')) {
+            // discharge_outcome has no value that means "unknown". (Non
+            // Responded is its own outcome now and fills _dis_no_response_.)
+            if (str_contains($key, '_dis_unknown_')) {
                 $cmam[] = $key;
             }
 
@@ -446,6 +447,11 @@ class MealReportService
                 'died' => 'died',
                 'discharge_to_opt' => 'referred_medical',
                 'discharge_to_other' => 'other',
+                // The two outcomes that used to be stored as
+                // 'discharge_to_other'; each lands in the template column
+                // that was already waiting for it.
+                'non_responded' => 'no_response',
+                'referred_medical_inpt' => 'referred_medical',
                 // 'under_follow_up' is an open case, not a discharge at all.
                 default => null,
             };

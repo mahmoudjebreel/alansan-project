@@ -9,7 +9,9 @@ use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\ChildResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\Child;
+use App\Models\FollowUpChild;
 use App\Support\ChildDuplicateChecker;
+use App\Support\ChildFollowUpTransfer;
 use App\Support\FilamentInfolist;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
@@ -193,10 +195,51 @@ class ChildResource extends Resource
         // duplicate alert and the visit type.
         $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
 
-        // Settled from the row already in hand rather than by looking the same
-        // child up a second time.
+        // The follow-up module's own knowledge of the child, whatever became
+        // of the episode. A closed episode is a finished treatment, not a
+        // forgotten child: it still says who the child is, and the referral
+        // prompt needs to know that a new episode would be a readmission.
+        $episode = ChildDuplicateChecker::latestFollowUpEpisode($childId);
+
+        static::announceFollowUpHistory($livewire, $childId, $episode);
+
+        // Settled from the rows already in hand rather than by looking the
+        // same child up a second time.
         if ($livewire instanceof \Filament\Resources\Pages\CreateRecord) {
-            $set('visit_type', ChildDuplicateChecker::resolveVisitTypeFrom($existing, $get('muac_mm')));
+            $set('visit_type', match (true) {
+                $existing !== null => ChildDuplicateChecker::resolveVisitTypeFrom($existing, $get('muac_mm')),
+                $episode !== null => ChildDuplicateChecker::resolveVisitTypeAgainstFollowUp($episode, $get('muac_mm')),
+                default => 'new',
+            });
+        }
+
+        // Known to the follow-up module only - a historical episode with no
+        // screening in Children behind it. Still the same child: the alert
+        // says so, and offers what the episode knows about them.
+        if (! $existing && $episode) {
+            $livewire->dispatch('show-duplicate-visit-alert', [
+                'title' => __('ui.duplicate.child_title'),
+                'last_visit_date' => $episode->latestVisit()?->visit_date?->format('Y-m-d')
+                    ?? $episode->admission_date?->format('Y-m-d')
+                    ?? '-',
+                'last_visit_type' => __('ui.follow_up_identity.known_from_follow_up'),
+                'follow_up_state' => static::followUpStateText($episode),
+                'visit_type_warning' => null,
+                'confirm_button_text' => __('ui.duplicate.child_confirm'),
+                'action_type' => 'fill_child',
+                'index_url' => static::getUrl('index'),
+                'record_data' => [
+                    'child_id' => $episode->id_number,
+                    'name' => $episode->child_name,
+                    'phone_number' => $episode->mobile_number,
+                    'sex' => ChildFollowUpTransfer::toChildSex($episode->sex),
+                    'date_of_birth' => $episode->dob?->format('Y-m-d'),
+                    'governorate' => $episode->governorate,
+                    'location' => $episode->shelter_name,
+                ],
+            ]);
+
+            return;
         }
 
         // Rule 2: a first visit is simply "new" - no alert, nothing to confirm.
@@ -266,11 +309,52 @@ class ChildResource extends Resource
             'title' => __('ui.duplicate.child_title'),
             'last_visit_date' => $lastVisitDate,
             'last_visit_type' => $lastVisitType,
+            'follow_up_state' => $episode ? static::followUpStateText($episode) : null,
             'visit_type_warning' => null,
             'confirm_button_text' => __('ui.duplicate.child_confirm'),
             'action_type' => 'fill_child',
             'index_url' => static::getUrl('index'),
             'record_data' => $recordData,
+        ]);
+    }
+
+    /**
+     * Tell the browser where the child stands in the follow-up module, so the
+     * SAM/MAM referral prompt can say "readmission" when that is what a new
+     * episode would be. Sent on every child ID check, including "nothing on
+     * file", so an earlier answer never lingers after the ID is changed.
+     */
+    private static function announceFollowUpHistory(object $livewire, mixed $childId, ?FollowUpChild $episode): void
+    {
+        $livewire->dispatch('follow-up-history-known', [
+            'child_id' => (string) $childId,
+            'state' => match (true) {
+                $episode === null => 'none',
+                $episode->isLocked() => 'closed',
+                default => 'open',
+            },
+            'outcome' => $episode?->isLocked()
+                ? __('fields.' . $episode->discharge_outcome)
+                : null,
+            'discharge_date' => $episode?->discharge_date?->format('Y-m-d'),
+            // Whether a new episode would be a readmission: only after one of
+            // the outcomes that allow it, never merely because it is closed.
+            'readmission' => $episode?->canBeReadmitted() ?? false,
+        ]);
+    }
+
+    /**
+     * One line for the duplicate alert: the episode on file and how it stands.
+     */
+    private static function followUpStateText(FollowUpChild $episode): string
+    {
+        if (! $episode->isLocked()) {
+            return __('ui.follow_up_identity.open');
+        }
+
+        return __('ui.follow_up_identity.closed', [
+            'outcome' => __('fields.' . $episode->discharge_outcome),
+            'date' => $episode->discharge_date?->format('Y-m-d') ?? '-',
         ]);
     }
 
@@ -311,7 +395,7 @@ class ChildResource extends Resource
                     ->label(__('fields.muac_mm'))
                     ->numeric()
                     ->required()
-                    ->rules(['integer', 'min:1', 'max:200'])
+                    ->rules(['integer', 'min:1', 'max:500'])
                     ->validationMessages([
                         'required' => __('ui.validation.muac_required'),
                         'integer' => __('ui.validation.muac_integer'),

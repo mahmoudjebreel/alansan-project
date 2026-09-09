@@ -247,10 +247,21 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
                 continue;
             }
 
-            $visits[$number] ??= ['visit_number' => $number, 'visit_date' => null, 'muac' => null];
+            $visits[$number] ??= ['visit_number' => $number, 'visit_date' => null, 'muac' => null, 'status' => null];
 
             if ($column['type'] === 'visit_date') {
                 $visits[$number]['visit_date'] = $this->parseDate($value, __('fields.visit_date_n', ['n' => $number]), $messages);
+            } elseif ($column['type'] === 'visit_status') {
+                // Attended or missed. Only an export writes this column; a
+                // sheet without it - every sheet typed by hand - records
+                // attended visits, exactly as it always has.
+                $cast = $this->schema->castVisitStatus($value, __('fields.visit_status_n', ['n' => $number]));
+
+                if ($cast['ok']) {
+                    $visits[$number]['status'] = $cast['value'];
+                } else {
+                    $messages[] = $cast['message'];
+                }
             } else {
                 $visits[$number]['muac'] = $this->parseNumber($value, __('fields.visit_muac_n', ['n' => $number]), $messages);
             }
@@ -285,7 +296,10 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
                 continue;
             }
 
-            if (! filled($visit['muac'])) {
+            // A missed visit is still a visit with a date - the one it was
+            // due on - so a status with no date is reported like a reading
+            // with no date, not dropped.
+            if (! filled($visit['muac']) && blank($visit['status'] ?? null)) {
                 unset($visits[$number]);
 
                 continue;

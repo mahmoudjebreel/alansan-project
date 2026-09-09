@@ -33,6 +33,13 @@ final class ImportedRowDeriver
      * Children: the visit type comes from the relapse rule, and the age in
      * months from the date of birth.
      *
+     * The visit type settled here is provisional: it is decided again when the
+     * row is written, in visit order, so a later visit of the same child in the
+     * same file is compared against the earlier one rather than against the
+     * state from before the file was opened.
+     *
+     * @see \App\Support\Import\ChildImportVisits
+     *
      * @param  array<string, mixed>  $attributes
      * @return array<string, mixed>
      */

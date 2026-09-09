@@ -14,8 +14,23 @@ class FollowUpChildVisit extends Model
 
     protected $table = 'follow_up_child_visits';
 
+    /** The child came and was seen. What every visit on file was until now. */
+    public const STATUS_ATTENDED = 'attended';
+
+    /**
+     * The child did not come. Recorded only when a person records it - the
+     * system never writes a missed visit of its own accord.
+     */
+    public const STATUS_MISSED = 'missed';
+
+    /** @var array<string> */
+    public const STATUSES = [
+        self::STATUS_ATTENDED,
+        self::STATUS_MISSED,
+    ];
+
     protected $fillable = [
-        'follow_up_child_id', 'visit_number', 'visit_date', 'muac', 'fi',
+        'follow_up_child_id', 'visit_number', 'visit_date', 'muac', 'fi', 'status',
     ];
 
     protected $casts = [
@@ -24,9 +39,36 @@ class FollowUpChildVisit extends Model
         'muac' => 'decimal:1',
     ];
 
+    protected $attributes = [
+        'status' => self::STATUS_ATTENDED,
+    ];
+
     public function followUpChild(): BelongsTo
     {
         return $this->belongsTo(FollowUpChild::class);
+    }
+
+    public function isMissed(): bool
+    {
+        return $this->status === self::STATUS_MISSED;
+    }
+
+    /**
+     * A missed visit has no measurement: nobody was there to take one. The
+     * reading is cleared rather than kept, so a status changed to "missed"
+     * can never leave a number behind that reads as a taken measurement.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (FollowUpChildVisit $visit): void {
+            if (blank($visit->status)) {
+                $visit->status = self::STATUS_ATTENDED;
+            }
+
+            if ($visit->isMissed()) {
+                $visit->muac = null;
+            }
+        });
     }
 
     /**

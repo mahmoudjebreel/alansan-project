@@ -99,9 +99,12 @@ class EditChild extends EditRecord
 
         $this->openedFollowUpChild = $followUpChild;
 
+        // A child back after a closed episode was readmitted, and is told so.
+        $readmitted = $followUpChild->isReadmission();
+
         Notification::make()
-            ->title(__('ui.referral.edit_referred_title'))
-            ->body(__('ui.referral.edit_referred_body', [
+            ->title(__($readmitted ? 'fields.readmitted_to_follow_up_title' : 'ui.referral.edit_referred_title'))
+            ->body(__($readmitted ? 'fields.readmitted_to_follow_up_body' : 'ui.referral.edit_referred_body', [
                 'name' => $child->name,
                 'fi' => $followUpChild->admitted_with,
             ]))

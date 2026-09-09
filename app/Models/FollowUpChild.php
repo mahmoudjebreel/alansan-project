@@ -42,14 +42,49 @@ class FollowUpChild extends Model
         'defaulted',
         'discharge_to_opt',
         'discharge_to_other',
+        'non_responded',
+        'referred_medical_inpt',
         'died',
+    ];
+
+    /**
+     * The only closed outcomes after which the same child may be readmitted
+     * into a new episode: the exits after which the child is expected back.
+     *
+     * Closed is not the test. Cured, defaulted, non-responded and died all
+     * close a record just the same and never allow a readmission.
+     *
+     * @var array<string>
+     */
+    public const READMISSION_OUTCOMES = [
+        'discharge_to_opt',
+        'discharge_to_other',
+        'referred_medical_inpt',
+    ];
+
+    /**
+     * A first admission. Also what a NULL admission_type means: every record
+     * written before the column existed was one.
+     */
+    public const ADMISSION_NEW = 'new';
+
+    /**
+     * A new episode opened for a child whose previous episode had closed. The
+     * previous episode is never reopened or touched; this row follows it.
+     */
+    public const ADMISSION_READMISSION = 'readmission';
+
+    /** @var array<string> */
+    public const ADMISSION_TYPES = [
+        self::ADMISSION_NEW,
+        self::ADMISSION_READMISSION,
     ];
 
     protected $fillable = [
         'id_number', 'child_name', 'sex', 'dob', 'age', 'mobile_number',
         'shelter_name', 'governorate', 'causes_of_admission', 'admitted_with',
-        'admission_date', 'discharge_date', 'discharge_outcome', 'notes',
-        'source_child_visit_id',
+        'admission_type', 'admission_date', 'discharge_date', 'discharge_outcome',
+        'notes', 'source_child_visit_id', 'previous_follow_up_child_id',
     ];
 
     protected $casts = [
@@ -67,11 +102,149 @@ class FollowUpChild extends Model
     }
 
     /**
+     * Whether this episode was opened as a readmission of a child whose
+     * previous episode had closed.
+     */
+    public function isReadmission(): bool
+    {
+        return $this->admission_type === self::ADMISSION_READMISSION;
+    }
+
+    /**
+     * The admission type as stored, with the pre-column NULL read as 'new'.
+     */
+    public function admissionType(): string
+    {
+        return $this->admission_type ?: self::ADMISSION_NEW;
+    }
+
+    /**
+     * Whether this episode ended with one of the outcomes that allow the
+     * child to be readmitted. Decided by the discharge outcome itself and
+     * never inferred from the record merely being closed.
+     */
+    public function isReadmissionEligible(): bool
+    {
+        return $this->isLocked()
+            && in_array($this->discharge_outcome, self::READMISSION_OUTCOMES, true);
+    }
+
+    /**
+     * Whether a readmission may be opened from this record: its outcome is
+     * one that allows it, and no other episode is currently open for the
+     * same child ID. An open one is where the child is being treated, and a
+     * second would count one episode as two.
+     */
+    public function canBeReadmitted(): bool
+    {
+        return $this->isReadmissionEligible()
+            && filled($this->id_number)
+            && ! static::hasOpenEpisodeFor($this->id_number);
+    }
+
+    /**
+     * The closed episode a readmission for this child ID would follow on
+     * from, or null when there is none - or when the latest closed episode
+     * ended with an outcome that does not allow one.
+     *
+     * The latest closed episode is the one that decides: a child whose last
+     * episode ended as cured, defaulted, non-responded or died is not
+     * readmitted, whatever an earlier episode ended as.
+     */
+    public static function readmittableEpisodeFor(mixed $idNumber): ?self
+    {
+        $previous = static::latestClosedEpisodeFor($idNumber);
+
+        return $previous?->canBeReadmitted() ? $previous : null;
+    }
+
+    /**
+     * Whether an episode that has not been closed exists for this child ID.
+     */
+    public static function hasOpenEpisodeFor(mixed $idNumber): bool
+    {
+        // One definition of "open", shared with the referral layer.
+        return \App\Support\ChildFollowUpTransfer::hasOpenEpisode($idNumber);
+    }
+
+    /**
+     * The most recently closed episode for a child ID, or null when the child
+     * has none on file. The closed history a readmission follows on from.
+     */
+    public static function latestClosedEpisodeFor(mixed $idNumber): ?self
+    {
+        if (blank($idNumber)) {
+            return null;
+        }
+
+        return static::query()
+            ->where('id_number', $idNumber)
+            ->whereIn('discharge_outcome', self::CLOSING_OUTCOMES)
+            ->orderByDesc('discharge_date')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
+     * Every other episode on file for the same child, oldest first: the
+     * child's follow-up history as seen from this record.
+     */
+    public function otherEpisodes(): \Illuminate\Database\Eloquent\Builder
+    {
+        return static::query()
+            ->where('id_number', $this->id_number)
+            ->whereKeyNot($this->getKey())
+            ->orderBy('admission_date')
+            ->orderBy('id');
+    }
+
+    /**
+     * The closed episode this readmission follows on from, when one is
+     * linked. Documentary, like source_child_visit_id: no constraint.
+     */
+    public function previousEpisode(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(self::class, 'previous_follow_up_child_id');
+    }
+
+    /**
      * The most recent recorded visit, or null while none exists.
      */
     public function latestVisit(): ?FollowUpChildVisit
     {
         return $this->visits()->reorder()->orderByDesc('visit_number')->first();
+    }
+
+    /**
+     * The most recent visit the child actually attended, or null while none
+     * exists. A missed visit carries no reading, so it never answers for
+     * "the latest measurement".
+     */
+    public function latestAttendedVisit(): ?FollowUpChildVisit
+    {
+        return $this->visits()
+            ->reorder()
+            ->where('status', FollowUpChildVisit::STATUS_ATTENDED)
+            ->orderByDesc('visit_number')
+            ->first();
+    }
+
+    /**
+     * Whether the two most recent recorded visits were both missed - the
+     * programme's defaulter rule. Reported, never acted on: closing the
+     * episode as defaulted stays a person's decision.
+     */
+    public function meetsDefaulterRule(): bool
+    {
+        $lastTwo = $this->visits
+            ->sortByDesc('visit_number')
+            ->take(2);
+
+        if ($lastTwo->count() < 2) {
+            return false;
+        }
+
+        return $lastTwo->every(fn (FollowUpChildVisit $visit): bool => $visit->isMissed());
     }
 
     /**
@@ -183,12 +356,16 @@ class FollowUpChild extends Model
     }
 
     /**
-     * MUAC of the most recent recorded visit.
+     * MUAC of the most recent visit the child attended. A missed visit has no
+     * reading by definition, so it is skipped rather than reported as a
+     * measurement that is missing.
      */
     protected function latestMuac(): Attribute
     {
         return Attribute::make(
-            get: fn (): mixed => $this->visits->last()?->muac,
+            get: fn (): mixed => $this->visits
+                ->last(fn (FollowUpChildVisit $visit): bool => ! $visit->isMissed())
+                ?->muac,
         );
     }
 

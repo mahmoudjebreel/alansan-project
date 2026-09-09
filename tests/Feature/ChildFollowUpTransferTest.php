@@ -417,13 +417,17 @@ class ChildFollowUpTransferTest extends TestCase
 
         $base = count($export->fields());
 
+        // Four columns per visit: date, MUAC, FI and - since missed visits
+        // became recordable - the attended/missed status.
         $this->assertSame(__('fields.visit_date_n', ['n' => 1]), $headings[$base]);
         $this->assertSame(__('fields.visit_muac_n', ['n' => 1]), $headings[$base + 1]);
         $this->assertSame(__('fields.visit_fi_n', ['n' => 1]), $headings[$base + 2]);
-        $this->assertSame(__('fields.visit_date_n', ['n' => 2]), $headings[$base + 3]);
+        $this->assertSame(__('fields.visit_status_n', ['n' => 1]), $headings[$base + 3]);
+        $this->assertSame(__('fields.visit_date_n', ['n' => 2]), $headings[$base + 4]);
 
         $this->assertSame('SAM', $row[$base + 2]);
-        $this->assertSame('Normal', $row[$base + 5]);
+        $this->assertSame(__('fields.visit_attended'), $row[$base + 3]);
+        $this->assertSame('Normal', $row[$base + 6]);
         $this->assertCount(count($headings), $row);
     }
 

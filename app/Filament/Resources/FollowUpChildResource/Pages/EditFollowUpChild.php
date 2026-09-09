@@ -4,6 +4,7 @@ namespace App\Filament\Resources\FollowUpChildResource\Pages;
 
 use App\Filament\Resources\ChildResource;
 use App\Filament\Resources\FollowUpChildResource;
+use App\Filament\Resources\FollowUpChildResource\Actions\ReadmissionAction;
 use App\Models\FollowUpChild;
 use App\Support\ChildFollowUpTransfer;
 use App\Support\MuacClassifier;
@@ -19,6 +20,9 @@ class EditFollowUpChild extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            // A closed record cannot be saved here, but the child can be
+            // admitted again: this opens a new record and leaves this one.
+            ReadmissionAction::make(),
             Actions\DeleteAction::make()
                 ->authorize(fn (): bool => auth()->user()?->can('follow_up_children.delete') ?? false)
                 ->visible(fn (): bool => auth()->user()?->can('follow_up_children.delete') ?? false),
@@ -58,9 +62,27 @@ class EditFollowUpChild extends EditRecord
             return;
         }
 
+        // Two consecutive missed visits is the programme's defaulter rule.
+        // It is reported here and nothing more: the visits stay exactly as
+        // recorded, and closing the episode as defaulted is the person's
+        // decision, made on the outcome field like every other closure.
+        if ($record->meetsDefaulterRule()) {
+            Notification::make()
+                ->title(__('fields.defaulter_rule_title'))
+                ->body(__('fields.defaulter_rule_body'))
+                ->icon('heroicon-o-exclamation-triangle')
+                ->warning()
+                ->persistent()
+                ->send();
+        }
+
         $latestVisit = $record->latestVisit();
 
-        if ($latestVisit === null || MuacClassifier::classify($latestVisit->muac) !== MuacClassifier::NORMAL) {
+        if ($latestVisit === null || $latestVisit->isMissed()) {
+            return;
+        }
+
+        if (MuacClassifier::classify($latestVisit->muac) !== MuacClassifier::NORMAL) {
             return;
         }
 

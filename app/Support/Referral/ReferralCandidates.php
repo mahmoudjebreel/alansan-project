@@ -283,6 +283,9 @@ final class ReferralCandidates
     {
         return FollowUpChildVisit::query()
             ->whereNull('muac')
+            // A missed visit has no reading because nobody was there to
+            // take one; it is not a measurement waiting to be found.
+            ->where('status', FollowUpChildVisit::STATUS_ATTENDED)
             ->whereHas('followUpChild');
     }
 

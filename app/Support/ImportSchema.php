@@ -162,6 +162,13 @@ final class ImportSchema
                     if ($heading === $this->normalise(trans('fields.visit_muac_n', ['n' => $i], $locale))) {
                         return ['type' => 'visit_muac', 'number' => $i];
                     }
+
+                    // Written by the export, not by the template: read when
+                    // present so a re-uploaded file keeps its missed visits,
+                    // and simply absent from a sheet typed by hand.
+                    if ($heading === $this->normalise(trans('fields.visit_status_n', ['n' => $i], $locale))) {
+                        return ['type' => 'visit_status', 'number' => $i];
+                    }
                 }
             }
         }
@@ -695,6 +702,46 @@ final class ImportSchema
     public function optionsFor(string $field): ?array
     {
         return $this->selectOptions()[$field] ?? null;
+    }
+
+    /**
+     * Read a visit's attended/missed cell. The stored value, its label in
+     * either locale, and a few spellings a sheet may use are all accepted;
+     * anything else is refused by name, exactly as an enum cell is.
+     *
+     * @return array{ok: bool, value?: string, message?: string}
+     */
+    public function castVisitStatus(mixed $value, string $label): array
+    {
+        $needle = $this->normalise((string) $value);
+
+        $spellings = [
+            \App\Models\FollowUpChildVisit::STATUS_ATTENDED => ['attended', 'present', 'yes', 'حضر', 'حاضر', 'حضور'],
+            \App\Models\FollowUpChildVisit::STATUS_MISSED => ['missed', 'absent', 'defaulter', 'no', 'غائب', 'غياب', 'لم يحضر', 'متغيب'],
+        ];
+
+        foreach ($spellings as $status => $aliases) {
+            $aliases[] = $status;
+
+            foreach (self::LOCALES as $locale) {
+                $aliases[] = trans('fields.visit_' . $status, [], $locale);
+            }
+
+            foreach ($aliases as $alias) {
+                if ($needle === $this->normalise($alias)) {
+                    return ['ok' => true, 'value' => $status];
+                }
+            }
+        }
+
+        return [
+            'ok' => false,
+            'message' => __('fields.import_invalid_option', [
+                'value' => self::describe($value),
+                'field' => $label,
+                'allowed' => implode(' / ', [__('fields.visit_attended'), __('fields.visit_missed')]),
+            ]),
+        ];
     }
 
     /**

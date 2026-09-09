@@ -16,8 +16,8 @@ class FollowUpChildrenExport extends AbstractTableExport
         return [
             'id_number', 'child_name', 'sex', 'dob', 'age_at_admission', 'age',
             'mobile_number', 'shelter_name', 'governorate', 'causes_of_admission',
-            'admitted_with', 'admission_date', 'discharge_date', 'discharge_outcome',
-            'notes',
+            'admitted_with', 'admission_type', 'admission_date', 'discharge_date',
+            'discharge_outcome', 'notes',
         ];
     }
 
@@ -28,7 +28,7 @@ class FollowUpChildrenExport extends AbstractTableExport
 
     public function enumFields(): array
     {
-        return ['sex', 'admitted_with', 'discharge_outcome'];
+        return ['sex', 'admitted_with', 'admission_type', 'discharge_outcome'];
     }
 
     public function query(): Builder
@@ -47,6 +47,9 @@ class FollowUpChildrenExport extends AbstractTableExport
             // exported next to the measurement rather than left to the reader
             // to classify by hand.
             $headings[] = __('fields.visit_fi_n', ['n' => $i]);
+            // Attended or missed, so a re-upload of this file keeps the
+            // sequence of absences the record carries.
+            $headings[] = __('fields.visit_status_n', ['n' => $i]);
         }
 
         return $headings;
@@ -63,6 +66,9 @@ class FollowUpChildrenExport extends AbstractTableExport
             $row[] = $visit?->visit_date?->format('Y-m-d');
             $row[] = $visit?->muac;
             $row[] = $visit?->fi;
+            $row[] = $visit === null
+                ? null
+                : ($visit->isMissed() ? __('fields.visit_missed') : __('fields.visit_attended'));
         }
 
         return $row;

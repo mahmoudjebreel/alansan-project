@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Child;
+use App\Models\FollowUpChild;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -78,10 +79,78 @@ class ChildDuplicateChecker
      */
     public static function resolveVisitType(mixed $childId, mixed $currentMuacMm = null, ?Model $ignoreRecord = null): string
     {
-        return static::resolveVisitTypeFrom(
-            static::latestActiveVisit($childId, $ignoreRecord),
-            $currentMuacMm,
-        );
+        $previous = static::latestActiveVisit($childId, $ignoreRecord);
+
+        if ($previous) {
+            return static::resolveVisitTypeFrom($previous, $currentMuacMm);
+        }
+
+        // No screening on file, but the child is known to the follow-up
+        // module: an existing child, whatever became of that episode.
+        $episode = static::latestFollowUpEpisode($childId);
+
+        if ($episode) {
+            return static::resolveVisitTypeAgainstFollowUp($episode, $currentMuacMm);
+        }
+
+        return 'new';
+    }
+
+    /**
+     * Whether the child is known to the system at all - in Children, or in the
+     * follow-up module under any outcome, open or closed.
+     *
+     * Identity is a matter of the ID alone. A closed follow-up episode is a
+     * finished treatment, not a forgotten child: the row that carried it still
+     * says who the child is.
+     */
+    public static function isKnownChild(mixed $childId, ?Model $ignoreRecord = null): bool
+    {
+        return static::hasActiveVisit($childId, $ignoreRecord)
+            || static::latestFollowUpEpisode($childId) !== null;
+    }
+
+    /**
+     * The most recent follow-up episode on file for the child ID, open or
+     * closed, or null when the follow-up module has never seen the child.
+     * Trashed episodes are not part of the system any more, exactly as
+     * trashed Children rows are not.
+     */
+    public static function latestFollowUpEpisode(mixed $childId): ?FollowUpChild
+    {
+        if (blank($childId)) {
+            return null;
+        }
+
+        return FollowUpChild::query()
+            ->where('id_number', $childId)
+            ->orderByDesc('admission_date')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
+     * The relapse rule, measured against the last reading the follow-up
+     * module took when Children has none to offer.
+     *
+     * Same comparison as resolveVisitTypeFrom(): a deterioration from the
+     * last attended follow-up reading is a relapse and a new admission, a
+     * stable or improved one is a follow-up, and with nothing to compare -
+     * an episode with no measured visit - the child is simply a follow-up,
+     * because they are known.
+     */
+    public static function resolveVisitTypeAgainstFollowUp(FollowUpChild $episode, mixed $currentMuacMm = null): string
+    {
+        $lastReading = $episode->latestAttendedVisit()?->muac;
+
+        $previousSeverity = static::fiSeverity(Child::classifyMuac($lastReading));
+        $currentSeverity = static::fiSeverity(Child::classifyMuac($currentMuacMm));
+
+        if ($previousSeverity === null || $currentSeverity === null) {
+            return 'follow_up';
+        }
+
+        return $currentSeverity > $previousSeverity ? 'new' : 'follow_up';
     }
 
     /**

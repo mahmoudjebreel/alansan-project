@@ -4,8 +4,11 @@ namespace App\Services;
 
 use App\Imports\AbstractTableImport;
 use App\Imports\ImportDefinition;
+use App\Models\Child;
 use App\Models\FollowUpChild;
+use App\Models\FollowUpChildVisit;
 use App\Models\IndividualCounseling;
+use App\Support\Import\ChildImportVisits;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
@@ -70,11 +73,22 @@ final class ExcelImportService
             return ['imported' => 0, 'errors' => [__('fields.import_empty_file')]];
         }
 
+        // Children rows are visits, and a visit's type depends on the visits
+        // stored before it - so they are written in the order they happened,
+        // whatever order the file lists them in.
+        if ($definition->model === Child::class) {
+            $rows = ChildImportVisits::inVisitOrder($rows);
+        }
+
+        $imported = 0;
+
         try {
-            DB::transaction(function () use ($definition, $rows): void {
+            DB::transaction(function () use ($definition, $rows, &$imported): void {
                 foreach ($rows as $row) {
                     try {
-                        $this->createRecord($definition, $row['attributes'], $row['visits'], $row['followups'] ?? []);
+                        if ($this->createRecord($definition, $row['attributes'], $row['visits'], $row['followups'] ?? [])) {
+                            $imported++;
+                        }
                     } catch (\Illuminate\Database\QueryException $e) {
                         // Surface the offending row instead of a raw SQL dump.
                         throw new RowImportException(
@@ -92,14 +106,17 @@ final class ExcelImportService
             return ['imported' => 0, 'errors' => [$e->getMessage()]];
         }
 
-        return ['imported' => count($rows), 'errors' => []];
+        return ['imported' => $imported, 'errors' => []];
     }
 
     /**
      * Persist one row through the model, so accessors/mutators still run and
      * derived values (FI, MUAC degree) are recalculated rather than imported.
+     *
+     * Returns false for a row that was not written because the visit it
+     * describes is already in the system.
      */
-    private function createRecord(ImportDefinition $definition, array $attributes, array $visits, array $followups = []): void
+    private function createRecord(ImportDefinition $definition, array $attributes, array $visits, array $followups = []): bool
     {
         /** @var class-string<Model> $modelClass */
         $modelClass = $definition->model;
@@ -113,6 +130,17 @@ final class ExcelImportService
             static fn (mixed $value): bool => $value !== null,
         );
 
+        if ($model instanceof Child) {
+            // The same file uploaded twice must not store every visit twice.
+            if (ChildImportVisits::alreadyStored($attributes)) {
+                return false;
+            }
+
+            // Settled here, once the earlier visits of this file are stored,
+            // rather than at read time when none of them were yet.
+            $attributes['visit_type'] = ChildImportVisits::visitType($attributes);
+        }
+
         $model->fill($attributes);
         $model->save();
 
@@ -122,6 +150,9 @@ final class ExcelImportService
                     'visit_number' => $visit['visit_number'],
                     'visit_date' => $visit['visit_date'],
                     'muac' => $visit['muac'],
+                    // Attended unless the sheet says missed; the visit model
+                    // clears the reading of a missed one itself.
+                    'status' => $visit['status'] ?? FollowUpChildVisit::STATUS_ATTENDED,
                 ]);
             }
         }
@@ -139,6 +170,8 @@ final class ExcelImportService
                 ]);
             }
         }
+
+        return true;
     }
 
     /**
