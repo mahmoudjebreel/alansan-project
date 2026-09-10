@@ -313,11 +313,14 @@ class ChildFollowUpTransferTest extends TestCase
 
     public function test_every_manual_discharge_outcome_locks_the_record_without_creating_a_child(): void
     {
-        foreach (['defaulted', 'discharge_to_opt', 'discharge_to_other', 'died'] as $outcome) {
+        foreach (['discharge_to_opt', 'discharge_to_other', 'died'] as $outcome) {
             $record = FollowUpChild::factory()->create(['discharge_outcome' => $outcome]);
 
             $this->assertTrue($record->isLocked(), "[{$outcome}] must lock the record.");
         }
+
+        // Defaulted is a manual outcome that does not lock: the episode stays open.
+        $this->assertFalse(FollowUpChild::factory()->create(['discharge_outcome' => 'defaulted'])->isLocked());
 
         $this->assertSame(0, Child::count());
     }

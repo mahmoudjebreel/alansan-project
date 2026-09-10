@@ -8,6 +8,10 @@ use Filament\Widgets\ChartWidget;
 
 class WomenStatusDistributionChart extends ChartWidget
 {
+    protected static ?int $sort = 35;
+
+    protected ?string $maxHeight = '260px';
+
     public static function canView(): bool
     {
         return DashboardAnalytics::canViewPregnantLactatingWomen();

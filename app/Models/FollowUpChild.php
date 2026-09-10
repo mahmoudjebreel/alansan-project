@@ -35,11 +35,14 @@ class FollowUpChild extends Model
      * Outcomes that close a record. A closed record is read-only: the child
      * has left the programme and the history of that episode must not move.
      *
+     * 'defaulted' is deliberately not one of them. A defaulter has missed
+     * visits, not left the programme: the episode stays open, the child may
+     * come back to it, and the missed visits stay recorded visit by visit.
+     *
      * @var array<string>
      */
     public const CLOSING_OUTCOMES = [
         self::CURED_OUTCOME,
-        'defaulted',
         'discharge_to_opt',
         'discharge_to_other',
         'non_responded',
@@ -51,8 +54,9 @@ class FollowUpChild extends Model
      * The only closed outcomes after which the same child may be readmitted
      * into a new episode: the exits after which the child is expected back.
      *
-     * Closed is not the test. Cured, defaulted, non-responded and died all
-     * close a record just the same and never allow a readmission.
+     * Closed is not the test. Cured, non-responded and died all close a
+     * record just the same and never allow a readmission; a defaulter's
+     * record is not even closed, and never allows one either.
      *
      * @var array<string>
      */
@@ -148,8 +152,8 @@ class FollowUpChild extends Model
      * ended with an outcome that does not allow one.
      *
      * The latest closed episode is the one that decides: a child whose last
-     * episode ended as cured, defaulted, non-responded or died is not
-     * readmitted, whatever an earlier episode ended as.
+     * episode ended as cured, non-responded or died is not readmitted,
+     * whatever an earlier episode ended as.
      */
     public static function readmittableEpisodeFor(mixed $idNumber): ?self
     {

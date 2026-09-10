@@ -41,7 +41,7 @@ class FollowUpReadmissionEligibilityTest extends TestCase
     private const ELIGIBLE = ['discharge_to_opt', 'discharge_to_other', 'referred_medical_inpt'];
 
     /** Closed outcomes that never allow a readmission. */
-    private const INELIGIBLE = ['defaulted', 'cured', 'non_responded', 'died'];
+    private const INELIGIBLE = ['cured', 'non_responded', 'died'];
 
     protected function setUp(): void
     {
@@ -169,7 +169,12 @@ class FollowUpReadmissionEligibilityTest extends TestCase
     /** TEST 4 */
     public function test_readmission_is_not_offered_to_a_defaulter(): void
     {
-        $this->assertNotOffered($this->closedEpisode('defaulted'));
+        // A defaulter's episode is not closed at all: it stays open for the
+        // child to come back to, so there is nothing to readmit from.
+        $record = $this->closedEpisode('defaulted', ['discharge_date' => null]);
+
+        $this->assertFalse($record->isLocked());
+        $this->assertNotOffered($record);
     }
 
     /** TEST 5 */
@@ -220,6 +225,10 @@ class FollowUpReadmissionEligibilityTest extends TestCase
             $this->assertContains($outcome, FollowUpChild::CLOSING_OUTCOMES, "[{$outcome}] must still close the episode.");
             $this->assertNotContains($outcome, FollowUpChild::READMISSION_OUTCOMES);
         }
+
+        // Defaulted neither closes the episode nor allows a readmission.
+        $this->assertNotContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
+        $this->assertNotContains('defaulted', FollowUpChild::READMISSION_OUTCOMES);
     }
 
     public function test_readmission_is_not_offered_again_once_the_new_episode_is_open(): void

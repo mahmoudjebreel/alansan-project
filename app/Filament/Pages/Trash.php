@@ -8,8 +8,10 @@ use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
 use App\Models\MotherToMotherSession;
 use App\Models\PregnantLactatingWoman;
+use App\Support\BulkRecordWriter;
 use Carbon\Carbon;
 use Filament\Pages\Page;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -58,6 +60,26 @@ class Trash extends Page
      * @var array{total: int, modules: int, latest: string|null}
      */
     public array $summary = ['total' => 0, 'modules' => 0, 'latest' => null];
+
+    /**
+     * The rows ticked for a bulk action, as "module:id" keys.
+     *
+     * A key rather than a bare id because ids repeat across modules: child 7
+     * and follow-up child 7 are different records in different tables.
+     *
+     * @var array<int, string>
+     */
+    public array $selected = [];
+
+    /**
+     * Whether "everything in the trash" is selected, not just the ticked page.
+     *
+     * A flag, not a list: the trash can hold tens of thousands of keys and the
+     * listing was deliberately rebuilt so that nothing ever reads them all into
+     * memory. A bulk action under this flag runs one set-based statement per
+     * module instead.
+     */
+    public bool $selectingAll = false;
 
     public static function canAccess(): bool
     {
@@ -324,6 +346,178 @@ class Trash extends Page
             ->groupBy('subject_id')
             ->map(fn (Collection $activities) => $activities->first()?->causer?->name)
             ->filter();
+    }
+
+    /**
+     * The keys of the rows on the current page, in listing order.
+     *
+     * @return array<int, string>
+     */
+    public function pageKeys(): array
+    {
+        return $this->keysOnPage($this->getPage())
+            ->map(fn (object $entry): string => $entry->module_type . ':' . $entry->id)
+            ->all();
+    }
+
+    /**
+     * Whether every row on the current page is ticked - what drives the
+     * header checkbox.
+     */
+    public function isPageSelected(): bool
+    {
+        $keys = $this->pageKeys();
+
+        return $keys !== [] && array_diff($keys, $this->selected) === [];
+    }
+
+    /**
+     * How many records a bulk action would touch right now.
+     */
+    public function selectedCount(): int
+    {
+        return $this->selectingAll ? $this->summary['total'] : count($this->selected);
+    }
+
+    /**
+     * Tick every row on the current page (the header checkbox).
+     */
+    public function selectPage(): void
+    {
+        $this->selected = array_values(array_unique([...$this->selected, ...$this->pageKeys()]));
+    }
+
+    /**
+     * Extend a fully ticked page to the whole trash, across every page.
+     */
+    public function selectAll(): void
+    {
+        $this->selectPage();
+        $this->selectingAll = true;
+    }
+
+    public function deselectAll(): void
+    {
+        $this->selected = [];
+        $this->selectingAll = false;
+    }
+
+    /**
+     * Un-ticking any single row ends an "everything" selection: the user has
+     * just said one record is not included.
+     */
+    public function updatedSelected(): void
+    {
+        $this->selected = array_values(array_unique(array_filter($this->selected, 'is_string')));
+
+        if ($this->selectingAll && ! $this->isPageSelected()) {
+            $this->selectingAll = false;
+        }
+    }
+
+    /**
+     * Moving to another page drops the selection. Keeping keys from a page
+     * that is no longer visible would make the bulk buttons act on rows the
+     * user cannot see.
+     */
+    public function updatedPaginators(): void
+    {
+        $this->deselectAll();
+    }
+
+    /**
+     * Restore every selected record.
+     *
+     * Returns true on success; the front-end uses this to show the toast.
+     */
+    public function restoreSelected(): bool
+    {
+        abort_unless(auth()->user()?->can('trash.restore') ?? false, 403);
+
+        return $this->applyToSelection(fn (EloquentBuilder $query): int => BulkRecordWriter::restore($query));
+    }
+
+    /**
+     * Permanently delete every selected record. This cannot be undone.
+     *
+     * Returns true on success; the front-end uses this to show the toast.
+     */
+    public function forceDeleteSelected(): bool
+    {
+        abort_unless(auth()->user()?->can('trash.force_delete') ?? false, 403);
+
+        return $this->applyToSelection(fn (EloquentBuilder $query): int => BulkRecordWriter::forceDelete($query));
+    }
+
+    /**
+     * Run one set-based write per module over whatever is selected, then
+     * clear the selection and go back to the first page.
+     *
+     * BulkRecordWriter does the actual work: it is the same path the module
+     * listings use for their own bulk actions, so a follow-up child's visits
+     * are cleared on a force delete here exactly as they are there, and the
+     * operation lands in the activity log as one summary entry per module.
+     *
+     * @param  callable(EloquentBuilder): int  $write
+     */
+    protected function applyToSelection(callable $write): bool
+    {
+        $queries = $this->selectedQueries();
+
+        if ($queries === []) {
+            return false;
+        }
+
+        $affected = 0;
+
+        foreach ($queries as $query) {
+            $affected += $write($query);
+        }
+
+        $this->deselectAll();
+        $this->resetPage();
+
+        return $affected > 0;
+    }
+
+    /**
+     * One trashed-records query per module the selection touches.
+     *
+     * @return array<int, EloquentBuilder>
+     */
+    protected function selectedQueries(): array
+    {
+        $queries = [];
+
+        if ($this->selectingAll) {
+            foreach (static::modules() as $config) {
+                /** @var class-string<Model> $model */
+                $model = $config['model'];
+                $queries[] = $model::onlyTrashed();
+            }
+
+            return $queries;
+        }
+
+        $idsByType = [];
+
+        foreach ($this->selected as $key) {
+            [$type, $id] = array_pad(explode(':', $key, 2), 2, null);
+
+            if ($type === null || $id === null || ! ctype_digit($id) || ! isset(static::modules()[$type])) {
+                continue;
+            }
+
+            $idsByType[$type][] = (int) $id;
+        }
+
+        foreach ($idsByType as $type => $ids) {
+            /** @var class-string<Model> $model */
+            $model = static::modules()[$type]['model'];
+            $queries[] = $model::onlyTrashed()->whereIn('id', $ids);
+        }
+
+        return $queries;
     }
 
     /**

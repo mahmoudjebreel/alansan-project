@@ -9,6 +9,7 @@ use App\Filament\Resources\FollowUpChildResource\Pages;
 use App\Models\FollowUpChild;
 use App\Models\FollowUpChildVisit;
 use App\Filament\Resources\FollowUpChildResource\Actions\ReadmissionAction;
+use App\Filament\Resources\FollowUpChildResource\Actions\ReferToChildrenAction;
 use App\Support\FilamentInfolist;
 use App\Support\MuacClassifier;
 use Filament\Forms;
@@ -244,7 +245,11 @@ class FollowUpChildResource extends Resource
                     ->maxLength(255),
                 Forms\Components\Select::make('admitted_with')
                     ->label(__('fields.admitted_with'))
-                    ->required()
+                    // A readmission opened on a Normal reading was admitted
+                    // with neither SAM nor MAM and stores none; visit 1
+                    // carries its Normal FI. It is the one record that may
+                    // be saved - closed as cured, say - without picking one.
+                    ->required(fn (?FollowUpChild $record): bool => ! ($record?->isReadmission() && blank($record->admitted_with)))
                     ->options(['SAM' => 'SAM', 'MAM' => 'MAM']),
                 // Decided by how the episode was opened - a first admission,
                 // or a readmission after a closed one - never picked by hand.
@@ -608,6 +613,9 @@ class FollowUpChildResource extends Resource
                 // On a closed record only: opens a new episode for the same
                 // child and leaves this one exactly as it is.
                 ReadmissionAction::make(),
+                // On a cured record with no Children row for its ID number:
+                // writes that one row and leaves this record as it is.
+                ReferToChildrenAction::make(),
             ])
             ->bulkActions([
                 \Filament\Actions\BulkActionGroup::make([

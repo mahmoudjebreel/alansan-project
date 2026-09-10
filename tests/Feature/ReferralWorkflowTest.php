@@ -686,7 +686,7 @@ class ReferralWorkflowTest extends TestCase
         $episode = FollowUpChild::factory()->create([
             'id_number' => '470979444',
             'child_name' => 'A completely different spelling',
-            'discharge_outcome' => 'defaulted',
+            'discharge_outcome' => 'non_responded',
         ]);
 
         foreach (range(1, 8) as $number) {

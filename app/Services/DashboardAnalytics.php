@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Child;
 use App\Models\PregnantLactatingWoman;
 use App\Settings\GeneralSettings;
+use App\Support\MuacClassifier;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -46,13 +47,26 @@ class DashboardAnalytics
     public static function reportingTrend(string $model, ?string $filter): array
     {
         [$start, $end, $interval] = self::reportingPeriod($filter);
-        $format = $interval === 'day' ? '%Y-%m-%d' : '%Y-%m';
+        $keyFormat = $interval === 'day' ? 'Y-m-d' : 'Y-m';
 
+        // Grouped by the raw date rather than a DATE_FORMAT() expression: the
+        // window is at most a year, so this is a few hundred rows at the very
+        // most, and the same query runs on MySQL in production and on SQLite
+        // in the test suite. The month bucketing happens here instead.
         $counts = $model::query()
-            ->whereBetween('date_of_reporting', [$start->toDateString(), $end->toDateString()])
-            ->selectRaw("DATE_FORMAT(date_of_reporting, '{$format}') as period, COUNT(*) as total")
-            ->groupBy('period')
-            ->pluck('total', 'period');
+            // Full timestamps at both ends: a DATE column compares fine either
+            // way on MySQL, but SQLite keeps what Eloquent wrote - a midnight
+            // datetime string - and would sort today's rows past a bare date.
+            ->whereBetween('date_of_reporting', [$start->toDateTimeString(), $end->toDateTimeString()])
+            ->selectRaw('date_of_reporting as period, COUNT(*) as total')
+            ->groupBy('date_of_reporting')
+            ->pluck('total', 'period')
+            ->reduce(function (array $carry, $total, $date) use ($keyFormat): array {
+                $key = CarbonImmutable::parse($date)->format($keyFormat);
+                $carry[$key] = ($carry[$key] ?? 0) + (int) $total;
+
+                return $carry;
+            }, []);
 
         $labels = [];
         $values = [];
@@ -95,6 +109,69 @@ class DashboardAnalytics
             'displaced' => (int) ($counts->displaced_records ?? 0),
             'not_displaced' => (int) ($counts->not_displaced_records ?? 0),
         ];
+    }
+
+    /**
+     * How many screened children fall in each MUAC band.
+     *
+     * The bands are MuacClassifier's, applied in SQL so the count runs over
+     * the column rather than over a hydrated model per child. Children without
+     * a reading belong to no band, which is not the same as "normal".
+     *
+     * @return array{sam: int, mam: int, normal: int}
+     */
+    public static function nutritionStatus(): array
+    {
+        $sam = MuacClassifier::SAM_MAX_MM;
+        $mam = MuacClassifier::MAM_MAX_MM;
+
+        $counts = Child::query()
+            ->whereNotNull('muac_mm')
+            ->selectRaw("SUM(muac_mm <= {$sam}) as sam, SUM(muac_mm > {$sam} AND muac_mm < {$mam}) as mam, SUM(muac_mm >= {$mam}) as normal")
+            ->first();
+
+        return [
+            'sam' => (int) ($counts->sam ?? 0),
+            'mam' => (int) ($counts->mam ?? 0),
+            'normal' => (int) ($counts->normal ?? 0),
+        ];
+    }
+
+    /** @return array{pregnant: int, lactating: int} */
+    public static function womenStatus(): array
+    {
+        $counts = PregnantLactatingWoman::query()
+            ->selectRaw("SUM(status_type = 'pregnant') as pregnant, SUM(status_type = 'lactating') as lactating")
+            ->first();
+
+        return [
+            'pregnant' => (int) ($counts->pregnant ?? 0),
+            'lactating' => (int) ($counts->lactating ?? 0),
+        ];
+    }
+
+    /**
+     * Records reported on each of the last seven days, for the sparkline
+     * under a figure.
+     *
+     * @return array<int, int>
+     */
+    public static function weeklySparkline(string $model): array
+    {
+        return self::reportingTrend($model, '7_days')['values'];
+    }
+
+    /**
+     * A part as a whole-number percentage of a total, or null when there is
+     * nothing to take a share of.
+     */
+    public static function percentage(int $part, int $whole): ?string
+    {
+        if ($whole <= 0) {
+            return null;
+        }
+
+        return round($part * 100 / $whole) . '%';
     }
 
     public static function children(): Builder

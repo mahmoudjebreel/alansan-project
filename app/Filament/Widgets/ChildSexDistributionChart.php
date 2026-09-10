@@ -8,7 +8,9 @@ use Filament\Widgets\ChartWidget;
 
 class ChildSexDistributionChart extends ChartWidget
 {
-    protected ?string $maxHeight = '220px';
+    protected static ?int $sort = 30;
+
+    protected ?string $maxHeight = '260px';
 
     public static function canView(): bool
     {

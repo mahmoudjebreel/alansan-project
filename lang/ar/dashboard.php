@@ -21,4 +21,13 @@ return [
     'sam' => 'سوء تغذية حاد وخيم',
     'mam' => 'سوء تغذية حاد متوسط',
     'normal' => 'طبيعي',
+    'displacement_distribution' => 'توزيع السجلات حسب النزوح',
+    'displaced' => 'نازحون',
+    'not_displaced' => 'غير نازحين',
+    'new_and_follow_up' => ':new جديد · :follow_up متابعة',
+    'pregnant_and_lactating' => ':pregnant حامل · :lactating مرضع',
+    'share_of_screened' => ':share من الأطفال المقاسين',
+    'no_measurements' => 'لا توجد قياسات بعد',
+    'across_modules' => 'الأطفال والحوامل/المرضعات معاً',
+    'not_displaced_count' => 'غير النازحين: :count',
 ];

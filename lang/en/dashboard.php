@@ -21,4 +21,13 @@ return [
     'sam' => 'SAM',
     'mam' => 'MAM',
     'normal' => 'Normal',
+    'displacement_distribution' => 'Records by Displacement',
+    'displaced' => 'Displaced',
+    'not_displaced' => 'Not displaced',
+    'new_and_follow_up' => ':new new · :follow_up follow-up',
+    'pregnant_and_lactating' => ':pregnant pregnant · :lactating lactating',
+    'share_of_screened' => ':share of screened children',
+    'no_measurements' => 'No measurements yet',
+    'across_modules' => 'Children and pregnant/lactating women together',
+    'not_displaced_count' => 'Not displaced: :count',
 ];

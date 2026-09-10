@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Filament\Pages\Trash;
 use App\Models\Child;
+use App\Models\FollowUpChild;
+use App\Models\PregnantLactatingWoman;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -147,5 +149,158 @@ class TrashPageTest extends TestCase
             ->assertForbidden();
 
         $this->assertTrue(Child::onlyTrashed()->whereKey($child->id)->exists());
+    }
+
+    public function test_the_header_checkbox_selects_every_row_on_the_page(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        $children = Child::factory()->count(3)->create();
+        $children->each->delete();
+        $woman = PregnantLactatingWoman::factory()->create();
+        $woman->delete();
+
+        $component = Livewire::test(Trash::class)->call('selectPage');
+
+        $selected = $component->get('selected');
+
+        $this->assertCount(4, $selected);
+        $this->assertContains('pregnant_lactating_woman:' . $woman->id, $selected);
+        foreach ($children as $child) {
+            $this->assertContains('child:' . $child->id, $selected);
+        }
+        $this->assertTrue($component->instance()->isPageSelected());
+
+        $component->call('deselectAll');
+
+        $this->assertSame([], $component->get('selected'));
+    }
+
+    public function test_restore_selected_restores_only_the_ticked_records(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        [$kept, $restored] = Child::factory()->count(2)->create();
+        $kept->delete();
+        $restored->delete();
+        $woman = PregnantLactatingWoman::factory()->create();
+        $woman->delete();
+
+        Livewire::test(Trash::class)
+            ->set('selected', ['child:' . $restored->id, 'pregnant_lactating_woman:' . $woman->id])
+            ->call('restoreSelected')
+            ->assertReturned(true)
+            ->assertSet('selected', []);
+
+        $this->assertTrue(Child::whereKey($restored->id)->exists());
+        $this->assertTrue(PregnantLactatingWoman::whereKey($woman->id)->exists());
+        $this->assertTrue(Child::onlyTrashed()->whereKey($kept->id)->exists());
+    }
+
+    public function test_select_all_reaches_every_page_of_the_trash(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        // More than one page, so the page's keys alone would not cover it.
+        Child::factory()->count(30)->create()->each->delete();
+        $followUp = FollowUpChild::factory()->create();
+        $followUp->delete();
+
+        $component = Livewire::test(Trash::class)->call('selectAll');
+
+        $this->assertTrue($component->get('selectingAll'));
+        $this->assertSame(31, $component->instance()->selectedCount());
+
+        $component->call('forceDeleteSelected')->assertReturned(true);
+
+        $this->assertSame(0, Child::withTrashed()->count());
+        $this->assertSame(0, FollowUpChild::withTrashed()->count());
+        $this->assertFalse($component->get('selectingAll'));
+    }
+
+    public function test_unticking_a_row_ends_a_select_all(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        $children = Child::factory()->count(3)->create();
+        $children->each->delete();
+
+        $component = Livewire::test(Trash::class)->call('selectAll');
+        $this->assertTrue($component->get('selectingAll'));
+
+        $remaining = array_slice($component->get('selected'), 1);
+        $component->set('selected', $remaining);
+
+        $this->assertFalse($component->get('selectingAll'));
+        $this->assertSame(2, $component->instance()->selectedCount());
+    }
+
+    public function test_bulk_actions_ignore_malformed_keys_and_need_a_selection(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        $child = Child::factory()->create();
+        $child->delete();
+
+        Livewire::test(Trash::class)
+            ->set('selected', ['nonsense', 'unknown:1', 'child:abc'])
+            ->call('restoreSelected')
+            ->assertReturned(false);
+
+        $this->assertTrue(Child::onlyTrashed()->whereKey($child->id)->exists());
+    }
+
+    public function test_bulk_restore_is_blocked_for_users_without_permission(): void
+    {
+        $this->actingAsRole('Super Admin');
+        $child = Child::factory()->create();
+        $child->delete();
+
+        $user = User::factory()->create();
+        $user->givePermissionTo('trash.view');
+        $this->actingAs($user);
+
+        Livewire::test(Trash::class)
+            ->set('selected', ['child:' . $child->id])
+            ->call('restoreSelected')
+            ->assertForbidden();
+
+        Livewire::test(Trash::class)
+            ->set('selected', ['child:' . $child->id])
+            ->call('forceDeleteSelected')
+            ->assertForbidden();
+
+        $this->assertTrue(Child::onlyTrashed()->whereKey($child->id)->exists());
+    }
+
+    public function test_the_page_renders_the_selection_controls(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        $child = Child::factory()->create();
+        $child->delete();
+
+        $html = $this->get('/admin/trash')->assertOk()->getContent();
+        $decoded = html_entity_decode($html, ENT_QUOTES);
+
+        $this->assertStringContainsString('wire:model.live="selected"', $html);
+        $this->assertStringContainsString('value="child:' . $child->id . '"', $html);
+        $this->assertStringContainsString("'selectPage' : 'deselectAll'", $decoded);
+        $this->assertStringNotContainsString('@js(', $html);
+    }
+
+    public function test_the_bulk_bar_appears_once_something_is_selected(): void
+    {
+        $this->actingAsRole('Super Admin');
+
+        $child = Child::factory()->create();
+        $child->delete();
+
+        Livewire::test(Trash::class)
+            ->assertDontSee(__('ui.trash.restore_selected'))
+            ->set('selected', ['child:' . $child->id])
+            ->assertSee(__('ui.trash.restore_selected'))
+            ->assertSee(__('ui.trash.force_delete_selected'))
+            ->assertSee(__('ui.trash.selected_count', ['count' => 1]));
     }
 }

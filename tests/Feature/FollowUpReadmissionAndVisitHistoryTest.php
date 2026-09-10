@@ -45,7 +45,6 @@ class FollowUpReadmissionAndVisitHistoryTest extends TestCase
     /** Every outcome that closes an episode, as the module defines them. */
     private const CLOSED_OUTCOMES = [
         'cured',
-        'defaulted',
         'non_responded',
         'referred_medical_inpt',
         'discharge_to_opt',
@@ -447,7 +446,12 @@ class FollowUpReadmissionAndVisitHistoryTest extends TestCase
         $this->assertSame('referred_medical_inpt', $old->fresh()->discharge_outcome);
     }
 
-    public function test_a_normal_reading_cannot_open_a_readmission(): void
+    /**
+     * A Normal reading opens the readmission too, classified as Normal: the
+     * child is back under monitoring, admitted with neither SAM nor MAM.
+     * The full flow is covered by ReadmissionMuacClassificationTest.
+     */
+    public function test_a_normal_reading_opens_a_readmission_under_monitoring(): void
     {
         $old = $this->closedEpisode();
 
@@ -457,9 +461,15 @@ class FollowUpReadmissionAndVisitHistoryTest extends TestCase
                 'visit_date' => '2026-09-09',
                 'muac' => 130,
             ])
-            ->assertHasActionErrors(['muac']);
+            ->assertHasNoActionErrors();
 
-        $this->assertSame(1, FollowUpChild::where('id_number', '470828468')->count());
+        $this->assertSame(2, FollowUpChild::where('id_number', '470828468')->count());
+
+        $new = FollowUpChild::where('id_number', '470828468')->orderByDesc('id')->first();
+        $this->assertTrue($new->isReadmission());
+        $this->assertNull($new->admitted_with);
+        $this->assertSame('Normal', $new->visits()->first()->fi);
+        $this->assertFalse($new->isLocked());
     }
 
     public function test_the_listing_tells_a_readmission_apart_from_a_first_admission(): void

@@ -17,6 +17,11 @@
 
     Every visible string comes from lang/*\/ui.php, and every badge from the
     module registry in App\Filament\Pages\Trash::modules().
+
+    Selection: each row carries a checkbox bound to $selected, the header
+    checkbox ticks or clears the whole page, and a fully ticked page offers to
+    extend the selection to everything in the trash. The bulk bar above the
+    table runs the same confirm-then-call flow as the per-row buttons.
 --}}
 <x-filament-panels::page>
     @php
@@ -25,6 +30,10 @@
         $canRestore = auth()->user()?->can('trash.restore') ?? false;
         $canForceDelete = auth()->user()?->can('trash.force_delete') ?? false;
         $hasActions = $canRestore || $canForceDelete;
+
+        $selectedCount = $this->selectedCount();
+        $pageSelected = $this->isPageSelected();
+        $selectingAll = $this->selectingAll;
 
         $confirmJs = function (array $options, string $method, array $params): string {
             $arguments = array_map(
@@ -86,10 +95,85 @@
             </x-slot>
 
             @if ($rows->total() > 0)
+                @if ($hasActions && $selectedCount > 0)
+                    <div class="ael-trash-bulk" wire:key="trash-bulk-bar">
+                        <div class="ael-trash-bulk__summary">
+                            <span class="ael-trash-bulk__count">
+                                @if ($selectingAll)
+                                    {{ __('ui.trash.everything_selected', ['count' => $summary['total']]) }}
+                                @else
+                                    {{ __('ui.trash.selected_count', ['count' => $selectedCount]) }}
+                                @endif
+                            </span>
+
+                            @if ($pageSelected && ! $selectingAll && $rows->hasPages())
+                                <button type="button" class="ael-trash-bulk__link" wire:click="selectAll">
+                                    {{ __('ui.trash.select_everything', ['count' => $summary['total']]) }}
+                                </button>
+                            @endif
+
+                            <button type="button" class="ael-trash-bulk__link" wire:click="deselectAll">
+                                {{ __('ui.trash.clear_selection') }}
+                            </button>
+                        </div>
+
+                        <div class="ael-trash-bulk__actions">
+                            @if ($canRestore)
+                                <x-filament::button
+                                    tag="button"
+                                    size="sm"
+                                    color="success"
+                                    icon="heroicon-o-arrow-uturn-left"
+                                    :x-on:click="$confirmJs([
+                                        'title' => __('ui.trash.confirm_bulk_restore.title'),
+                                        'text' => __('ui.trash.confirm_bulk_restore.text', ['count' => $selectedCount]),
+                                        'icon' => 'question',
+                                        'confirmText' => __('ui.trash.confirm_bulk_restore.confirm'),
+                                        'successText' => __('ui.trash.confirm_bulk_restore.success'),
+                                        'errorText' => __('ui.trash.confirm_bulk_restore.error'),
+                                    ], 'restoreSelected', [])"
+                                >
+                                    {{ __('ui.trash.restore_selected') }}
+                                </x-filament::button>
+                            @endif
+
+                            @if ($canForceDelete)
+                                <x-filament::button
+                                    tag="button"
+                                    size="sm"
+                                    color="danger"
+                                    icon="heroicon-o-trash"
+                                    :x-on:click="$confirmJs([
+                                        'title' => __('ui.trash.confirm_bulk_force_delete.title'),
+                                        'text' => __('ui.trash.confirm_bulk_force_delete.text', ['count' => $selectedCount]),
+                                        'icon' => 'warning',
+                                        'danger' => true,
+                                        'confirmText' => __('ui.trash.confirm_bulk_force_delete.confirm'),
+                                        'successText' => __('ui.trash.confirm_bulk_force_delete.success'),
+                                        'errorText' => __('ui.trash.confirm_bulk_force_delete.error'),
+                                    ], 'forceDeleteSelected', [])"
+                                >
+                                    {{ __('ui.trash.force_delete_selected') }}
+                                </x-filament::button>
+                            @endif
+                        </div>
+                    </div>
+                @endif
+
                 <div class="ael-trash-table-wrap">
                     <table class="ael-trash-table">
                         <thead>
                             <tr>
+                                @if ($hasActions)
+                                    <th class="ael-trash-table__check">
+                                        <x-filament::input.checkbox
+                                            :checked="$pageSelected"
+                                            :title="__('ui.trash.select_page')"
+                                            :aria-label="__('ui.trash.select_page')"
+                                            x-on:change="$wire.call($event.target.checked ? 'selectPage' : 'deselectAll')"
+                                        />
+                                    </th>
+                                @endif
                                 <th>{{ __('ui.trash.columns.module') }}</th>
                                 <th>{{ __('ui.trash.columns.name') }}</th>
                                 <th>{{ __('ui.trash.columns.identifier') }}</th>
@@ -103,7 +187,25 @@
 
                         <tbody>
                             @foreach ($rows as $row)
-                                <tr wire:key="trash-{{ $row['type'] }}-{{ $row['id'] }}">
+                                @php
+                                    $key = $row['type'] . ':' . $row['id'];
+                                @endphp
+
+                                <tr
+                                    wire:key="trash-{{ $row['type'] }}-{{ $row['id'] }}"
+                                    @class(['ael-trash-table__row--selected' => in_array($key, $this->selected, true)])
+                                >
+                                    @if ($hasActions)
+                                        <td class="ael-trash-table__check">
+                                            <x-filament::input.checkbox
+                                                wire:model.live="selected"
+                                                :value="$key"
+                                                :checked="in_array($key, $this->selected, true)"
+                                                :aria-label="__('ui.trash.select_row')"
+                                            />
+                                        </td>
+                                    @endif
+
                                     <td>
                                         <x-filament::badge :color="$row['color']" :icon="$row['icon']">
                                             {{ $row['module'] }}

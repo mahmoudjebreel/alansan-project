@@ -12,14 +12,12 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Enums\ThemeMode;
 use Filament\Navigation\NavigationGroup;
-use Filament\Pages\Dashboard;
 use App\Http\Middleware\SetLocale;
 use Filament\Navigation\MenuItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
-use Filament\Widgets\AccountWidget;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -103,14 +101,13 @@ class AdminPanelProvider extends PanelProvider
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->unsavedChangesAlerts()
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
+            // The home page is App\Filament\Pages\Dashboard, picked up by the
+            // page discovery above; registering Filament's own here as well
+            // would put two pages on the same route.
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
-            ->pages([
-                Dashboard::class,
-            ])
+            // No account widget: the figures open the page, and the user menu
+            // in the top bar already carries the name and the sign-out link.
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
-            ->widgets([
-                AccountWidget::class,
-            ])
             ->userMenuItems([
                 MenuItem::make('locale_en')
                     ->label('EN')

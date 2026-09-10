@@ -50,6 +50,28 @@ return [
         ],
         'restore' => 'Restore',
         'force_delete' => 'Delete permanently',
+        'select_page' => 'Select all',
+        'select_row' => 'Select record',
+        'selected_count' => ':count record(s) selected',
+        'select_everything' => 'Select every record in the trash (:count)',
+        'everything_selected' => 'Every record in the trash is selected (:count)',
+        'clear_selection' => 'Clear selection',
+        'restore_selected' => 'Restore selected',
+        'force_delete_selected' => 'Delete selected permanently',
+        'confirm_bulk_restore' => [
+            'title' => 'Restore selected records',
+            'text' => 'Restore :count record(s) and return them to their own listings?',
+            'confirm' => 'Yes, restore them',
+            'success' => 'The selected records were restored',
+            'error' => 'The selected records could not be restored',
+        ],
+        'confirm_bulk_force_delete' => [
+            'title' => 'Delete selected permanently',
+            'text' => 'Warning: :count record(s) will be removed from the database for good and cannot be recovered. Continue?',
+            'confirm' => 'Yes, delete them permanently',
+            'success' => 'The selected records were permanently deleted',
+            'error' => 'The selected records could not be deleted',
+        ],
         'empty_title' => 'The trash is empty',
         'empty_description' => 'Nothing has been deleted yet. Any record you delete from a module shows up here and can be restored.',
         'confirm_restore' => [
@@ -105,6 +127,28 @@ return [
         'all' => 'All cases',
         'active' => 'Active follow-up',
         'closed' => 'Closed / discharged',
+        'cured_pending_referral' => 'Cured cases pending referral',
+    ],
+
+    // -----------------------------------------------------------------
+    // Cured Follow Up Child -> Children manual referral
+    // -----------------------------------------------------------------
+    'cured_referral' => [
+        'action' => 'Refer to Children',
+        'heading' => 'Refer to Children: :name',
+        'description' => 'This child was discharged as cured but has no record in the Children module under this ID number. A Children record will be created from this follow-up case. The follow-up case, its outcome and its visits are not changed.',
+        'case' => 'Follow-up case',
+        'outcome_line' => 'Follow-up outcome: :outcome (:date).',
+        'unchanged_line' => 'The follow-up case will remain closed and unchanged.',
+        'submit' => 'Confirm referral',
+        'done_title' => 'Referred to Children',
+        'done_body' => 'A Children record was created for :name. The follow-up case is unchanged.',
+        'blocked' => [
+            'already_exists' => 'No record was created: a Children record with this ID number already exists.',
+            'not_cured' => 'No record was created: this follow-up case is not closed as cured.',
+            'missing_data' => 'No record was created: the child is missing a name, an ID number or a sex.',
+            'no_visit' => 'No record was created: the follow-up case has no attended visit to carry a measurement from.',
+        ],
     ],
 
     'referral_center' => [

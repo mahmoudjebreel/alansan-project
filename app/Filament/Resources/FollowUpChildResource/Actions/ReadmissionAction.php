@@ -72,19 +72,14 @@ final class ReadmissionAction
                     ->label(__('ui.readmission.first_visit_date'))
                     ->default(now()->format('Y-m-d'))
                     ->required(),
+                // The reading classifies the readmission - SAM, MAM or
+                // Normal - by the shared classifier, in the transfer. A
+                // Normal reading opens the episode too, under monitoring.
                 TextInput::make('muac')
                     ->label(__('fields.muac'))
                     ->numeric()
                     ->required()
-                    ->helperText(__('ui.readmission.muac_hint'))
-                    // The programme admits on SAM or MAM. A Normal reading is
-                    // not an admission, and the form says so rather than
-                    // opening an episode that no rule would have opened.
-                    ->rule(static fn (): \Closure => static function (string $attribute, mixed $value, \Closure $fail): void {
-                        if (! MuacClassifier::isMalnourished(MuacClassifier::classify($value))) {
-                            $fail(__('ui.readmission.muac_not_admissible'));
-                        }
-                    }),
+                    ->helperText(__('ui.readmission.muac_hint')),
             ])
             ->action(function (FollowUpChild $record, array $data, Action $action): void {
                 $followUpChild = ChildFollowUpTransfer::readmitFromEpisode($record, $data);
@@ -104,7 +99,9 @@ final class ReadmissionAction
                     ->title(__('ui.readmission.done_title'))
                     ->body(__('ui.readmission.done_body', [
                         'name' => $followUpChild->child_name,
-                        'fi' => $followUpChild->admitted_with,
+                        // What the entered reading classified as, Normal
+                        // included; the admission column holds SAM/MAM only.
+                        'fi' => MuacClassifier::classify($data['muac'] ?? null),
                     ]))
                     ->icon('heroicon-o-arrow-path-rounded-square')
                     ->success()

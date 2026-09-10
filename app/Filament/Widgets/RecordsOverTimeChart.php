@@ -9,7 +9,11 @@ use Filament\Widgets\ChartWidget;
 
 class RecordsOverTimeChart extends ChartWidget
 {
-    protected int | string | array $columnSpan = ['lg' => 2];
+    protected static ?int $sort = 0;
+
+    protected int | string | array $columnSpan = 'full';
+
+    protected ?string $maxHeight = '300px';
 
     public ?string $filter = '30_days';
 

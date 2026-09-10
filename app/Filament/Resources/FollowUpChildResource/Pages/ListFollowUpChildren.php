@@ -9,6 +9,7 @@ use App\Exports\FollowUpChildPdfExport;
 use App\Filament\Resources\FollowUpChildResource;
 use App\Filament\Concerns\HasExcelImport;
 use App\Models\FollowUpChild;
+use App\Support\Referral\CuredChildrenReferral;
 use App\Support\Referral\ReferralCandidates;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
@@ -56,6 +57,16 @@ class ListFollowUpChildren extends ListRecords
                 ->badgeColor('gray')
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query
                     ->whereIn('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES)),
+
+            // Cured records whose ID number is on no Children row: the ones
+            // still waiting to be sent to Children by hand. A subset of
+            // "closed"; nothing is taken away from the other tabs.
+            // @see \App\Support\Referral\CuredChildrenReferral
+            'cured_pending_referral' => Tab::make(__('ui.follow_up_tabs.cured_pending_referral'))
+                ->icon('heroicon-o-arrow-right-circle')
+                ->badge(fn (): int => CuredChildrenReferral::query()->count())
+                ->badgeColor('warning')
+                ->modifyQueryUsing(fn (Builder $query): Builder => CuredChildrenReferral::scope($query)),
         ];
     }
 

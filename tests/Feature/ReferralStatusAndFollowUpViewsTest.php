@@ -492,12 +492,12 @@ class ReferralStatusAndFollowUpViewsTest extends TestCase
     {
         $episode = FollowUpChild::factory()->create([
             'id_number' => '900000100',
-            'discharge_outcome' => 'defaulted',
+            'discharge_outcome' => 'non_responded',
         ]);
 
         $this->child(110, ['child_id' => '900000100']);
 
-        $this->assertSame('defaulted', $episode->fresh()->discharge_outcome);
+        $this->assertSame('non_responded', $episode->fresh()->discharge_outcome);
         $this->assertSame(0, ReferralCandidates::activeFollowUps()->count());
     }
 }

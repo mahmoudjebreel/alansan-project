@@ -9,9 +9,12 @@ use Filament\Widgets\ChartWidget;
 
 class GovernorateDistributionChart extends ChartWidget
 {
-    protected int | string | array $columnSpan = 1;
+    protected static ?int $sort = 10;
 
-    protected ?string $maxHeight = '220px';
+    /** Two of the three columns on a wide screen; the nutrition doughnut takes the third. */
+    protected int | string | array $columnSpan = ['default' => 1, 'md' => 2, 'xl' => 2];
+
+    protected ?string $maxHeight = '260px';
 
     public static function canView(): bool
     {
@@ -36,11 +39,11 @@ class GovernorateDistributionChart extends ChartWidget
         $datasets = [];
 
         if ($children !== []) {
-            $datasets[] = ['label' => __('dashboard.children'), 'data' => array_map(fn (string $label): int => $children[$label] ?? 0, $labels), 'borderColor' => DashboardAnalytics::primaryColor(), 'backgroundColor' => DashboardAnalytics::primaryColor(), 'fill' => false, 'tension' => 0.3, 'borderWidth' => 2, 'pointRadius' => 3];
+            $datasets[] = ['label' => __('dashboard.children'), 'data' => array_map(fn (string $label): int => $children[$label] ?? 0, $labels), 'borderColor' => DashboardAnalytics::primaryColor(), 'backgroundColor' => DashboardAnalytics::primaryColor(), 'borderRadius' => 6, 'maxBarThickness' => 36];
         }
 
         if ($women !== []) {
-            $datasets[] = ['label' => __('dashboard.pregnant_lactating_women'), 'data' => array_map(fn (string $label): int => $women[$label] ?? 0, $labels), 'borderColor' => DashboardAnalytics::secondaryColor(), 'backgroundColor' => DashboardAnalytics::secondaryColor(), 'fill' => false, 'tension' => 0.3, 'borderWidth' => 2, 'pointRadius' => 3];
+            $datasets[] = ['label' => __('dashboard.pregnant_lactating_women'), 'data' => array_map(fn (string $label): int => $women[$label] ?? 0, $labels), 'borderColor' => DashboardAnalytics::secondaryColor(), 'backgroundColor' => DashboardAnalytics::secondaryColor(), 'borderRadius' => 6, 'maxBarThickness' => 36];
         }
 
         return compact('datasets', 'labels');
@@ -48,7 +51,7 @@ class GovernorateDistributionChart extends ChartWidget
 
     protected function getType(): string
     {
-        return 'line';
+        return 'bar';
     }
 
     public function getEmptyStateDescription(): ?string

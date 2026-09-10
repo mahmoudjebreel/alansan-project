@@ -104,6 +104,13 @@ final class ChildFollowUpTransfer
      * exactly as a screening does. The closed record is read and never
      * written: it keeps its outcome, its discharge date and every visit.
      *
+     * The reading entered classifies the readmission, by the one shared
+     * classifier: SAM or MAM is stored as the admission classification, and
+     * a Normal reading opens the episode with none - the child is back under
+     * monitoring, not admitted with malnutrition, and visit 1 carries the
+     * Normal FI itself. The previous episode's classification is never
+     * copied. Only a reading that classifies as nothing at all is refused.
+     *
      * @param  array{admission_date?: mixed, visit_date?: mixed, muac: mixed}  $data
      */
     public static function readmitFromEpisode(FollowUpChild $previous, array $data): ?FollowUpChild
@@ -114,7 +121,7 @@ final class ChildFollowUpTransfer
 
         $fi = MuacClassifier::classify($data['muac'] ?? null);
 
-        if (! MuacClassifier::isMalnourished($fi)) {
+        if ($fi === null) {
             return null;
         }
 
@@ -132,7 +139,9 @@ final class ChildFollowUpTransfer
                 'shelter_name' => $previous->shelter_name,
                 'governorate' => $previous->governorate ?: 'gaza',
                 'causes_of_admission' => 'malnutrition',
-                'admitted_with' => $fi,
+                // The column holds SAM or MAM only; a Normal readmission is
+                // admitted with neither.
+                'admitted_with' => MuacClassifier::isMalnourished($fi) ? $fi : null,
                 'admission_type' => FollowUpChild::ADMISSION_READMISSION,
                 'admission_date' => $admissionDate,
                 'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
