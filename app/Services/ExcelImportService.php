@@ -8,7 +8,9 @@ use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Models\FollowUpChildVisit;
 use App\Models\IndividualCounseling;
+use App\Models\PregnantLactatingWoman;
 use App\Support\Import\ChildImportVisits;
+use App\Support\PregnantWomanDuplicateChecker;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
@@ -139,6 +141,18 @@ final class ExcelImportService
             // Settled here, once the earlier visits of this file are stored,
             // rather than at read time when none of them were yet.
             $attributes['visit_type'] = ChildImportVisits::visitType($attributes);
+        }
+
+        if ($model instanceof PregnantLactatingWoman) {
+            // Same reason as above: the status rule compares this visit with
+            // the mother's latest stored one, and the earlier rows of this
+            // file are stored by now. Decided at read time only, a "pregnant"
+            // row under a "pregnant + lactating" row of the same file was
+            // compared with the record from before the upload instead.
+            $attributes['visit_type'] = PregnantWomanDuplicateChecker::resolveVisitType(
+                $attributes['mother_id'] ?? null,
+                $attributes['status_type'] ?? null,
+            );
         }
 
         $model->fill($attributes);

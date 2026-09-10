@@ -60,10 +60,15 @@ class PregnantWomanVisitTypeAndHusbandTest extends TestCase
     public static function statusSwitchMatrix(): array
     {
         return [
-            'pregnant to lactating is a new cycle' => ['pregnant', 'lactating', 'new'],
-            'lactating to pregnant is a new cycle' => ['lactating', 'pregnant', 'new'],
             'pregnant to pregnant stays a follow up' => ['pregnant', 'pregnant', 'follow_up'],
+            'pregnant to lactating is a new cycle' => ['pregnant', 'lactating', 'new'],
+            'pregnant to pregnant + lactating is a new cycle' => ['pregnant', 'pregnant_lactating', 'new'],
             'lactating to lactating stays a follow up' => ['lactating', 'lactating', 'follow_up'],
+            'lactating to pregnant is a new cycle' => ['lactating', 'pregnant', 'new'],
+            'lactating to pregnant + lactating is a new cycle' => ['lactating', 'pregnant_lactating', 'new'],
+            'pregnant + lactating to pregnant + lactating stays a follow up' => ['pregnant_lactating', 'pregnant_lactating', 'follow_up'],
+            'pregnant + lactating to pregnant is a new cycle' => ['pregnant_lactating', 'pregnant', 'new'],
+            'pregnant + lactating to lactating is a new cycle' => ['pregnant_lactating', 'lactating', 'new'],
         ];
     }
 

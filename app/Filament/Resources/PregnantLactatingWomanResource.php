@@ -316,7 +316,7 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.muac_mm'))
                     ->numeric()
                     ->required()
-                    ->rules(['integer', 'min:1', 'max:250'])
+                    ->rules(['integer', 'min:1', 'max:500'])
                     ->validationMessages([
                         'required' => __('ui.validation.muac_required'),
                         'integer' => __('ui.validation.muac_integer'),
@@ -569,6 +569,7 @@ class PregnantLactatingWomanResource extends Resource
             'mother_id',
             'full_name_ar',
             'status_type',
+            'visit_type',
             'governorate',
             'date_of_reporting',
             'muac_mm',
@@ -605,6 +606,11 @@ class PregnantLactatingWomanResource extends Resource
                         'lactating' => 'success',
                         default => 'gray',
                     })
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('visit_type')
+                    ->label(__('fields.visit_type'))
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => __('fields.' . $state))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('governorate')
                     ->label(__('fields.governorate'))
@@ -647,6 +653,12 @@ class PregnantLactatingWomanResource extends Resource
                 Tables\Filters\SelectFilter::make('status_type')
                     ->label(__('fields.status_type'))
                     ->options(static::statusTypeOptions()),
+                Tables\Filters\SelectFilter::make('visit_type')
+                    ->label(__('fields.visit_type'))
+                    ->options([
+                        'new' => __('fields.new'),
+                        'follow_up' => __('fields.follow_up'),
+                    ]),
                 Tables\Filters\SelectFilter::make('governorate')
                     ->label(__('fields.governorate')),
                 Tables\Filters\SelectFilter::make('type_of_site')
