@@ -32,7 +32,8 @@ use Illuminate\Database\Eloquent\Builder;
  *    the same number of queries as reporting one.
  *  - Every sheet is filtered on its own date. Screening uses the reporting
  *    date, IYCF the counselling or session date, CMAM the admission date for
- *    admissions and the discharge date for discharges.
+ *    admissions and the discharge date for discharges (and for the length of
+ *    stay, which is reported in the month the case closed).
  *
  * Columns the template asks for that this system does not capture are returned
  * as null rather than 0, so a blank cell reads as "not measured" instead of
@@ -49,21 +50,10 @@ class MealReportService
     {
         $cmam = [];
 
-        // No oedema flag on follow_up_children, so SAM-with-oedema admissions
-        // cannot be separated out at all.
         foreach (MealReportLayout::columns(MealReportLayout::SHEET_CMAM) as $key) {
-            if (str_starts_with($key, 'sam_oedema_adm_')) {
-                $cmam[] = $key;
-            }
-
             // discharge_outcome has no value that means "unknown". (Non
             // Responded is its own outcome now and fills _dis_no_response_.)
             if (str_contains($key, '_dis_unknown_')) {
-                $cmam[] = $key;
-            }
-
-            // Admissions are not classified as new / relapse / readmission.
-            if (str_contains($key, '_adm_') && (str_contains($key, '_relapse_') || str_contains($key, '_readmission_'))) {
                 $cmam[] = $key;
             }
 
@@ -377,23 +367,35 @@ class MealReportService
 
     /**
      * The CMAM treatment journey, and only that: admission, then closure.
-     * Every figure comes from follow_up_children.
+     * Every figure comes from follow_up_children, one row per episode, so an
+     * episode is counted once as an admission (on its admission date) and at
+     * most once as a discharge (on its discharge date). A readmission is its
+     * own row and therefore its own admission; the closed episode it follows
+     * keeps its own historical admission and discharge.
      *
      * A repeated screening in the Children module is a screening follow-up,
      * never a CMAM event, so nothing on this sheet is derived from how often a
      * child ID appears there - and a Normal screening is never a recovery.
      *
-     * @return array<int, array<int, array<string, int|float>>>
+     * @return array<int, array<int, array<string, int|float|array{days: int, cases: int}>>>
      */
     private function cmam(ReportPeriod $period, ?string $site): array
     {
         $buckets = [];
+        $table = (new FollowUpChild)->getTable();
+        $admissionKind = $this->cmamAdmissionKindExpression($table);
 
         // Admissions fall in the month they were admitted in.
+        //
+        // follow_up_children carries no oedema flag of its own; the screening
+        // visit an episode was raised from (source_child_visit_id) does. It is
+        // joined for that one column and nothing else, so an episode with no
+        // linked screening is simply an admission without oedema.
         $admissions = $this->followUpQuery($site)
-            ->whereBetween('admission_date', $period->dateRange())
-            ->selectRaw('admission_date, admitted_with, sex, dob, COUNT(*) as aggregate_count')
-            ->groupBy('admission_date', 'admitted_with', 'sex', 'dob')
+            ->leftJoin((new Child)->getTable() . ' as screening', 'screening.id', '=', "{$table}.source_child_visit_id")
+            ->whereBetween("{$table}.admission_date", $period->dateRange())
+            ->selectRaw("{$table}.admission_date, {$table}.admitted_with, {$table}.sex, {$table}.dob, screening.has_oedema, {$admissionKind} as admission_kind, COUNT(*) as aggregate_count")
+            ->groupBy(["{$table}.admission_date", "{$table}.admitted_with", "{$table}.sex", "{$table}.dob", 'screening.has_oedema', 'admission_kind'])
             ->get();
 
         foreach ($admissions as $row) {
@@ -404,12 +406,21 @@ class MealReportService
                 continue;
             }
 
-            // Every admission is counted as "New": nothing distinguishes a
-            // relapse or a readmission - see unsupportedColumns().
+            // New, relapse or readmission - see cmamAdmissionKindExpression().
+            $kind = $row->admission_kind;
+
+            // The template keeps SAM with oedema apart from the other SAM
+            // admissions (its discharge block is the one marked "including
+            // oedema"), so an oedematous SAM admission is counted there and
+            // not again under plain SAM. The classification itself is the
+            // stored admitted_with: a MAM admission stays MAM whatever the
+            // screening's oedema flag says.
+            $prefix = $programme === 'sam' && (bool) $row->has_oedema ? 'sam_oedema' : $programme;
+
             $this->add(
                 $buckets,
                 Carbon::parse($row->admission_date),
-                "{$programme}_adm_{$band}_new_{$this->cmamSex($row->sex)}",
+                "{$prefix}_adm_{$band}_{$kind}_{$this->cmamSex($row->sex)}",
                 (int) $row->aggregate_count,
             );
         }
@@ -421,8 +432,6 @@ class MealReportService
             ->selectRaw('discharge_date, admission_date, discharge_outcome, admitted_with, sex, dob, COUNT(*) as aggregate_count')
             ->groupBy('discharge_date', 'admission_date', 'discharge_outcome', 'admitted_with', 'sex', 'dob')
             ->get();
-
-        $stays = [];
 
         foreach ($discharges as $row) {
             $dischargedOn = Carbon::parse($row->discharge_date);
@@ -456,33 +465,82 @@ class MealReportService
                 default => null,
             };
 
-            if ($outcome !== null) {
-                $this->add($buckets, $dischargedOn, "{$programme}_dis_{$outcome}_{$band}_{$sex}", $count);
+            // Not a discharge at all (still under follow-up, or no outcome
+            // recorded), so neither a discharge nor a length of stay.
+            if ($outcome === null) {
+                continue;
             }
 
-            if ($programme === 'sam' && $row->discharge_outcome === 'discharge_to_opt') {
+            $this->add($buckets, $dischargedOn, "{$programme}_dis_{$outcome}_{$band}_{$sex}", $count);
+
+            // A SAM case referred out of the programme: to inpatient care
+            // for a medical reason, or to another OTP.
+            if ($programme === 'sam' && in_array($row->discharge_outcome, ['referred_medical_inpt', 'discharge_to_opt'], true)) {
                 $this->add($buckets, $dischargedOn, "sam_referred_{$band}_{$sex}", $count);
             }
 
+            // Length of stay: admission date to discharge date, in days. The
+            // day total and the case count are both kept, so every average
+            // (the day's, the month's, the period's) is taken over the cases
+            // themselves rather than over other averages.
             if ($row->admission_date !== null) {
-                $length = Carbon::parse($row->admission_date)->diffInDays($dischargedOn, absolute: true);
-                $key = "{$programme}_los_{$band}_{$sex}";
-                $stays[$dischargedOn->month][$dischargedOn->day][$key][] = ['days' => $length, 'weight' => $count];
-            }
-        }
-
-        // Length of stay is an average, so it is accumulated separately.
-        foreach ($stays as $month => $daysOfMonth) {
-            foreach ($daysOfMonth as $day => $keys) {
-                foreach ($keys as $key => $entries) {
-                    $weight = array_sum(array_column($entries, 'weight'));
-                    $total = array_sum(array_map(fn (array $e): float => $e['days'] * $e['weight'], $entries));
-                    $buckets[$month][$day][$key] = $weight > 0 ? round($total / $weight, 1) : null;
-                }
+                $length = (int) Carbon::parse($row->admission_date)->diffInDays($dischargedOn, absolute: true);
+                $this->addStay($buckets, $dischargedOn, "{$programme}_los_{$band}_{$sex}", $length * $count, $count);
             }
         }
 
         return $buckets;
+    }
+
+    /**
+     * How an admission is reported: 'new', 'relapse' or 'readmission'.
+     *
+     * Readmission is what the episode says it is: admission_type is written
+     * by the readmission workflow and nowhere else. Of the rest, the child's
+     * first episode on file is a new admission; an episode opened after an
+     * earlier one - the child came back after a closed episode whose outcome
+     * did not allow a readmission, typically a cure - is a relapse. This is
+     * the same reading the Children module's relapse rule makes when it
+     * raises the admission: a known child deteriorating is a relapse, and a
+     * new admission. Trashed episodes are not part of the history, exactly
+     * as everywhere else in the system.
+     *
+     * Written as one SQL expression so the admissions stay a single grouped
+     * query, whatever the length of the period.
+     */
+    private function cmamAdmissionKindExpression(string $table): string
+    {
+        $readmission = FollowUpChild::ADMISSION_READMISSION;
+
+        return "CASE
+            WHEN {$table}.admission_type = '{$readmission}' THEN 'readmission'
+            WHEN EXISTS (
+                SELECT 1 FROM {$table} AS earlier
+                WHERE earlier.id_number = {$table}.id_number
+                  AND earlier.deleted_at IS NULL
+                  AND earlier.id <> {$table}.id
+                  AND (
+                      earlier.admission_date < {$table}.admission_date
+                      OR (earlier.admission_date = {$table}.admission_date AND earlier.id < {$table}.id)
+                  )
+            ) THEN 'relapse'
+            ELSE 'new'
+        END";
+    }
+
+    /**
+     * Accumulate a length-of-stay bucket: total days over total cases.
+     *
+     * @param  array<int, array<int, array<string, mixed>>>  $buckets
+     */
+    private function addStay(array &$buckets, Carbon $on, string $key, int $days, int $cases): void
+    {
+        $bucket = $buckets[$on->month][$on->day][$key] ?? ['days' => 0, 'cases' => 0];
+
+        $buckets[$on->month][$on->day][$key] = [
+            'days' => $bucket['days'] + $days,
+            'cases' => $bucket['cases'] + $cases,
+        ];
     }
 
     // -----------------------------------------------------------------
@@ -527,7 +585,13 @@ class MealReportService
      * so "Total August" is August alone even when the report runs to October.
      * The period total is the sum of the monthly totals.
      *
-     * @param  array<int, array<int, array<string, int|float>>>  $buckets
+     * An average column (length of stay) arrives as a day total and a case
+     * count rather than a number, and every row - the day's, the month's and
+     * the period's - shows the days divided by the cases of that row alone. A
+     * month's average is therefore taken over the cases discharged in that
+     * month, not over the averages of its days.
+     *
+     * @param  array<int, array<int, array<string, int|float|array{days: int, cases: int}>>>  $buckets
      * @param  array<string, int>  $review
      * @return array{rows: array, totals: array, monthTotals: array<int, array>, monthStarts: array<int>, review: array<string, int>}
      */
@@ -541,7 +605,7 @@ class MealReportService
         $monthStarts = [];
         $monthTotals = [];
         $totals = array_fill_keys($columns, 0);
-        $averageBuckets = [];
+        $stays = [];
 
         foreach ($period->months() as $month) {
             $monthLabel = $period->monthLabel($month);
@@ -554,7 +618,7 @@ class MealReportService
 
             // This month's own running total, started afresh for every month.
             $monthTotal = array_fill_keys($columns, 0);
-            $monthAverageBuckets = [];
+            $monthStays = [];
 
             // A month with nothing in it still gets a row, all zero, so the
             // sequence of months in the file stays unbroken.
@@ -566,6 +630,15 @@ class MealReportService
                 $row = [];
 
                 foreach ($columns as $key) {
+                    if (isset($averages[$key])) {
+                        $stay = $values[$key] ?? ['days' => 0, 'cases' => 0];
+                        $row[$key] = $this->average($stay);
+                        $this->accumulateStay($monthStays, $key, $stay);
+                        $this->accumulateStay($stays, $key, $stay);
+
+                        continue;
+                    }
+
                     $row[$key] = match (true) {
                         $key === 'mba' => SiteVocabulary::label($site),
                         $key === 'month' => $monthLabel,
@@ -575,15 +648,6 @@ class MealReportService
                     };
 
                     if (isset($unsupported[$key]) || in_array($key, ['mba', 'month', 'day'], true)) {
-                        continue;
-                    }
-
-                    if (isset($averages[$key])) {
-                        if ($row[$key] !== null && $row[$key] > 0) {
-                            $averageBuckets[$key][] = $row[$key];
-                            $monthAverageBuckets[$key][] = $row[$key];
-                        }
-
                         continue;
                     }
 
@@ -603,9 +667,9 @@ class MealReportService
                 $monthTotal[$key] = null;
             }
 
+            // The month's average over the month's own cases.
             foreach (array_keys($averages) as $key) {
-                $bucket = $monthAverageBuckets[$key] ?? [];
-                $monthTotal[$key] = $bucket === [] ? 0 : round(array_sum($bucket) / count($bucket), 1);
+                $monthTotal[$key] = $this->average($monthStays[$key] ?? ['days' => 0, 'cases' => 0]);
             }
 
             $monthTotals[$month] = $monthTotal;
@@ -621,10 +685,9 @@ class MealReportService
             $totals[$key] = null;
         }
 
-        // Averaging an average: the totals row shows the mean of the daily means.
+        // The period's average over every case discharged in the period.
         foreach (array_keys($averages) as $key) {
-            $bucket = $averageBuckets[$key] ?? [];
-            $totals[$key] = $bucket === [] ? 0 : round(array_sum($bucket) / count($bucket), 1);
+            $totals[$key] = $this->average($stays[$key] ?? ['days' => 0, 'cases' => 0]);
         }
 
         return [
@@ -648,6 +711,31 @@ class MealReportService
         $day = $on->day;
 
         $buckets[$month][$day][$key] = ($buckets[$month][$day][$key] ?? 0) + $count;
+    }
+
+    /**
+     * Fold one length-of-stay bucket into a running one.
+     *
+     * @param  array<string, array{days: int, cases: int}>  $into
+     * @param  array{days: int, cases: int}  $stay
+     */
+    private function accumulateStay(array &$into, string $key, array $stay): void
+    {
+        $into[$key] = [
+            'days' => ($into[$key]['days'] ?? 0) + $stay['days'],
+            'cases' => ($into[$key]['cases'] ?? 0) + $stay['cases'],
+        ];
+    }
+
+    /**
+     * Days over cases, to one decimal; 0 where there were no cases, which is
+     * how a measured column that saw nothing has always read.
+     *
+     * @param  array{days: int, cases: int}  $stay
+     */
+    private function average(array $stay): float|int
+    {
+        return $stay['cases'] > 0 ? round($stay['days'] / $stay['cases'], 1) : 0;
     }
 
     // -----------------------------------------------------------------
