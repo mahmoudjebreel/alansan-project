@@ -21,9 +21,10 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  *
  * A report covering several months writes them one after another down this
  * same grid, in calendar order, each row naming its own month in the template's
- * MONTH column. The only thing the extra months add is a rule drawn across the
- * row each new month starts on, so the sections are easy to find; no column,
- * header or sheet is added or moved.
+ * MONTH column. Each month closes with its own Total row, summed from that
+ * month's rows alone, and a rule is drawn across the row each new month starts
+ * on, so the sections are easy to find; no column, header or sheet is added or
+ * moved.
  */
 class MealReportSheet implements FromArray, WithEvents, WithTitle
 {
@@ -57,15 +58,25 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
     private const FONT = 'Lato';
 
     /**
+     * The body below the header, in sheet order, each entry flagged so the
+     * decorator can tell a day row from a total row without re-deriving it.
+     *
+     * @var array<int, array{cells: array<int, int|float|string|null>, total: bool, monthStart: bool}>|null
+     */
+    private ?array $body = null;
+
+    /**
      * @param  array<int, array<string, int|float|string|null>>  $rows
      * @param  array<string, int|float|string|null>  $totals
      * @param  array<int>  $monthStarts  row offsets, into $rows, where a month begins
+     * @param  array<int, array<string, int|float|string|null>>  $monthTotals  one totals row per month, in the same order as $monthStarts
      */
     public function __construct(
         private readonly string $sheet,
         private readonly array $rows,
         private readonly array $totals,
         private readonly array $monthStarts = [],
+        private readonly array $monthTotals = [],
     ) {
     }
 
@@ -75,15 +86,15 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
     }
 
     /**
-     * The whole grid: a blank first row, the header block, then one row per
-     * day and a closing Total row.
+     * The whole grid: a blank first row, the header block, then each month's
+     * day rows followed by that month's Total row, and a closing Total row for
+     * the whole period when it spans more than one month.
      *
      * @return array<int, array<int, int|float|string|null>>
      */
     public function array(): array
     {
-        $columns = MealReportLayout::columns($this->sheet);
-        $width = count($columns);
+        $width = count(MealReportLayout::columns($this->sheet));
         $leafRow = MealReportLayout::LEAF_ROW[$this->sheet];
 
         $grid = [];
@@ -102,13 +113,58 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
             }
         }
 
-        foreach ($this->rows as $row) {
-            $grid[] = $this->toCells($row, $columns);
+        foreach ($this->body() as $entry) {
+            $grid[] = $entry['cells'];
         }
 
-        $grid[] = $this->toCells($this->totals, $columns);
-
         return $grid;
+    }
+
+    /**
+     * Lay the day rows out month by month, closing each month with its own
+     * Total row - the sum of that month alone - so the reader never has to
+     * add a month up by hand or mistake the period total for a monthly one.
+     *
+     * The period Total row is written only when there is more than one month:
+     * for a single month it would repeat the month's own total line for line.
+     * A sheet built with no month information at all (no monthStarts) keeps
+     * its old shape - the rows, then one Total row.
+     *
+     * @return array<int, array{cells: array<int, int|float|string|null>, total: bool, monthStart: bool}>
+     */
+    private function body(): array
+    {
+        if ($this->body !== null) {
+            return $this->body;
+        }
+
+        $columns = MealReportLayout::columns($this->sheet);
+        $monthTotals = array_values($this->monthTotals);
+        $body = [];
+
+        if ($this->monthStarts === []) {
+            foreach ($this->rows as $row) {
+                $body[] = ['cells' => $this->toCells($row, $columns), 'total' => false, 'monthStart' => false];
+            }
+        }
+
+        foreach ($this->monthStarts as $index => $start) {
+            $end = $this->monthStarts[$index + 1] ?? count($this->rows);
+
+            foreach (array_slice($this->rows, $start, $end - $start) as $offset => $row) {
+                $body[] = ['cells' => $this->toCells($row, $columns), 'total' => false, 'monthStart' => $offset === 0];
+            }
+
+            if (isset($monthTotals[$index])) {
+                $body[] = ['cells' => $this->toCells($monthTotals[$index], $columns), 'total' => true, 'monthStart' => false];
+            }
+        }
+
+        if (count($monthTotals) !== 1) {
+            $body[] = ['cells' => $this->toCells($this->totals, $columns), 'total' => true, 'monthStart' => false];
+        }
+
+        return $this->body = $body;
     }
 
     /**
@@ -140,7 +196,8 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
         $width = count($columns);
         $leafRow = MealReportLayout::LEAF_ROW[$this->sheet];
         $lastColumn = $sheet->getCellByColumnAndRow($width, 1)->getColumn();
-        $lastRow = $leafRow + count($this->rows) + 1;
+        $body = $this->body();
+        $lastRow = $leafRow + count($body);
 
         foreach (MealReportLayout::merges($this->sheet) as [$row, $column, $rowEnd, $columnEnd]) {
             // A few header captions occupy a single cell; merging those would
@@ -203,12 +260,22 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN]],
             ]);
 
-            $sheet->getStyle("A{$lastRow}:{$lastColumn}{$lastRow}")->applyFromArray([
-                'font' => ['bold' => true],
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F2F2F2']],
-            ]);
+            // Every Total row - each month's own and the period's - is set
+            // apart the same way: bold on grey, its label spanning MBA to DAY.
+            foreach ($body as $offset => $entry) {
+                if (! $entry['total']) {
+                    continue;
+                }
 
-            $sheet->mergeCells("A{$lastRow}:C{$lastRow}");
+                $row = $firstDataRow + $offset;
+
+                $sheet->getStyle("A{$row}:{$lastColumn}{$row}")->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F2F2F2']],
+                ]);
+
+                $sheet->mergeCells("A{$row}:C{$row}");
+            }
 
             $this->ruleOffMonths($sheet, $firstDataRow, $lastColumn);
         }
@@ -234,7 +301,19 @@ class MealReportSheet implements FromArray, WithEvents, WithTitle
      */
     private function ruleOffMonths(Worksheet $sheet, int $firstDataRow, string $lastColumn): void
     {
-        foreach (array_slice($this->monthStarts, 1) as $offset) {
+        $first = true;
+
+        foreach ($this->body() as $offset => $entry) {
+            if (! $entry['monthStart']) {
+                continue;
+            }
+
+            if ($first) {
+                $first = false;
+
+                continue;
+            }
+
             $row = $firstDataRow + $offset;
 
             $sheet->getStyle("A{$row}:{$lastColumn}{$row}")

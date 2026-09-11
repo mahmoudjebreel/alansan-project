@@ -36,6 +36,7 @@ class MealReportExport implements WithMultipleSheets
                 $this->data[$sheet]['rows'] ?? [],
                 $this->data[$sheet]['totals'] ?? [],
                 $this->data[$sheet]['monthStarts'] ?? [],
+                $this->data[$sheet]['monthTotals'] ?? [],
             ),
             MealReportLayout::sheets(),
         );

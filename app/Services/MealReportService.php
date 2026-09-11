@@ -515,17 +515,21 @@ class MealReportService
     // -----------------------------------------------------------------
 
     /**
-     * Turn the month => day => key => count map into ordered rows plus a
-     * totals row.
+     * Turn the month => day => key => count map into ordered rows, one totals
+     * row per month, and a totals row for the whole period.
      *
      * The months are walked in calendar order - never alphabetical - and every
      * month in the period gets rows, including one with no data at all: a
      * monitoring report is read as a sequence, and a month that quietly
      * disappeared would read as a month nobody was meant to look at.
      *
+     * Each month's total is summed from that month's rows and nothing else,
+     * so "Total August" is August alone even when the report runs to October.
+     * The period total is the sum of the monthly totals.
+     *
      * @param  array<int, array<int, array<string, int|float>>>  $buckets
      * @param  array<string, int>  $review
-     * @return array{rows: array, totals: array, monthStarts: array<int>, review: array<string, int>}
+     * @return array{rows: array, totals: array, monthTotals: array<int, array>, monthStarts: array<int>, review: array<string, int>}
      */
     private function finalise(string $sheet, ReportPeriod $period, ?string $site, array $buckets, array $review = []): array
     {
@@ -535,6 +539,7 @@ class MealReportService
 
         $rows = [];
         $monthStarts = [];
+        $monthTotals = [];
         $totals = array_fill_keys($columns, 0);
         $averageBuckets = [];
 
@@ -546,6 +551,10 @@ class MealReportService
             // Index of this month's first row, so the exporter can rule a line
             // between one month and the next.
             $monthStarts[] = count($rows);
+
+            // This month's own running total, started afresh for every month.
+            $monthTotal = array_fill_keys($columns, 0);
+            $monthAverageBuckets = [];
 
             // A month with nothing in it still gets a row, all zero, so the
             // sequence of months in the file stays unbroken.
@@ -572,16 +581,34 @@ class MealReportService
                     if (isset($averages[$key])) {
                         if ($row[$key] !== null && $row[$key] > 0) {
                             $averageBuckets[$key][] = $row[$key];
+                            $monthAverageBuckets[$key][] = $row[$key];
                         }
 
                         continue;
                     }
 
+                    $monthTotal[$key] += $row[$key];
                     $totals[$key] += $row[$key];
                 }
 
                 $rows[] = $row;
             }
+
+            // "Total August": the sum of August's rows only.
+            $monthTotal['mba'] = 'Total ' . $monthLabel;
+            $monthTotal['month'] = $monthLabel;
+            $monthTotal['day'] = '';
+
+            foreach (array_keys($unsupported) as $key) {
+                $monthTotal[$key] = null;
+            }
+
+            foreach (array_keys($averages) as $key) {
+                $bucket = $monthAverageBuckets[$key] ?? [];
+                $monthTotal[$key] = $bucket === [] ? 0 : round(array_sum($bucket) / count($bucket), 1);
+            }
+
+            $monthTotals[$month] = $monthTotal;
         }
 
         // The Total row spans the selected months and nothing else: every
@@ -600,7 +627,13 @@ class MealReportService
             $totals[$key] = $bucket === [] ? 0 : round(array_sum($bucket) / count($bucket), 1);
         }
 
-        return ['rows' => $rows, 'totals' => $totals, 'monthStarts' => $monthStarts, 'review' => $review];
+        return [
+            'rows' => $rows,
+            'totals' => $totals,
+            'monthTotals' => $monthTotals,
+            'monthStarts' => $monthStarts,
+            'review' => $review,
+        ];
     }
 
     /**

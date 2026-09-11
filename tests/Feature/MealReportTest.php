@@ -93,11 +93,16 @@ class MealReportTest extends TestCase
                 "Merged header ranges differ on sheet [{$name}].",
             );
 
-            // Same caption in every header cell.
+            // Same caption in every header cell. The one deliberate departure
+            // from the template is the PBW MUAC pair, which now names the
+            // threshold alone: "≥23 cm" / "<23 cm", without "Not wasted" /
+            // "Wasted".
             for ($row = 2; $row <= $leafRow; $row++) {
                 for ($column = 1; $column <= $width; $column++) {
+                    $templateCaption = (string) $expected->getCellByColumnAndRow($column, $row)->getValue();
+
                     $this->assertSame(
-                        (string) $expected->getCellByColumnAndRow($column, $row)->getValue(),
+                        self::pbwMuacCaption($templateCaption) ?? $templateCaption,
                         (string) $actual->getCellByColumnAndRow($column, $row)->getValue(),
                         "Header caption differs at [{$name}] column {$column}, row {$row}.",
                     );
@@ -106,6 +111,19 @@ class MealReportTest extends TestCase
         }
 
         @unlink($path);
+    }
+
+    /**
+     * The caption the report writes where the template says "≥23cm Not
+     * wasted" / "<23cm Wasted"; null for every other template caption.
+     */
+    public static function pbwMuacCaption(string $templateCaption): ?string
+    {
+        return match (true) {
+            str_starts_with($templateCaption, '≥23cm') => '≥23 cm',
+            str_starts_with($templateCaption, '<23cm') => '<23 cm',
+            default => null,
+        };
     }
 
     public function test_the_kit_distribution_sheet_is_not_produced(): void

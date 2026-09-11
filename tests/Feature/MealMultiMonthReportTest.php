@@ -449,14 +449,22 @@ class MealMultiMonthReportTest extends TestCase
         $sheet = $book->getSheetByName(MealReportLayout::SHEET_SCREENING);
         $first = MealReportLayout::FIRST_DATA_ROW[MealReportLayout::SHEET_SCREENING];
 
-        // MONTH column, three months running down the same sheet, then Total.
-        $months = [];
-        for ($row = $first; $row <= $first + 2; $row++) {
-            $months[] = (string) $sheet->getCell([2, $row])->getValue();
+        // Three months running down the same sheet, each closed by its own
+        // Total row, then the Total for the whole period.
+        $stub = [];
+        for ($row = $first; $row <= $first + 6; $row++) {
+            $stub[] = (string) $sheet->getCell([1, $row])->getValue() . '|' . (string) $sheet->getCell([2, $row])->getValue();
         }
 
-        $this->assertSame(['August', 'September', 'October'], $months);
-        $this->assertSame('Total', (string) $sheet->getCell([1, $first + 3])->getValue());
+        $this->assertSame([
+            self::SITE . '|August',
+            'Total August|',
+            self::SITE . '|September',
+            'Total September|',
+            self::SITE . '|October',
+            'Total October|',
+            'Total|',
+        ], $stub);
 
         @unlink($path);
     }
@@ -480,8 +488,11 @@ class MealMultiMonthReportTest extends TestCase
 
             for ($row = 2; $row <= $leafRow; $row++) {
                 for ($column = 1; $column <= $width; $column++) {
+                    $templateCaption = (string) $template->getSheetByName($name)->getCell([$column, $row])->getValue();
+
                     $this->assertSame(
-                        (string) $template->getSheetByName($name)->getCell([$column, $row])->getValue(),
+                        // The PBW MUAC pair reads "≥23 cm" / "<23 cm" on purpose.
+                        MealReportTest::pbwMuacCaption($templateCaption) ?? $templateCaption,
                         (string) $produced->getSheetByName($name)->getCell([$column, $row])->getValue(),
                         "Header caption differs at [{$name}] column {$column}, row {$row}.",
                     );
