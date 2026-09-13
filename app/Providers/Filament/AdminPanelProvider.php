@@ -13,6 +13,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Enums\ThemeMode;
 use Filament\Navigation\NavigationGroup;
 use App\Http\Middleware\SetLocale;
+use App\Http\Middleware\TrackUserActivity;
 use Filament\Navigation\MenuItem;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -154,6 +155,9 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                // Observes page loads for the User Activity page. Writes only
+                // in terminate(), after the response has been sent.
+                TrackUserActivity::class,
             ])
             ->authMiddleware([
                 Authenticate::class,

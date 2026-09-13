@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\FollowUpChildResource\Pages;
 
 use App\Events\ExcelActionOccurred;
+use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\FollowUpChildrenExport;
 use App\Exports\FollowUpChildPdfExport;
@@ -110,6 +111,8 @@ class ListFollowUpChildren extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('follow_up_children.export') ?? false, 403);
+
+        AuditEvents::pdfExport('FollowUpChild');
 
         // This module keeps repeated visits: they print as numbered rows
         // under the record, not as thirty-two extra columns.

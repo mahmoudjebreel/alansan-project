@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PregnantLactatingWomanResource\Pages;
 
 use App\Events\ExcelActionOccurred;
+use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\PdfExport;
 use App\Exports\PregnantWomenExport;
@@ -58,6 +59,8 @@ class ListPregnantLactatingWomen extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('pregnant.export') ?? false, 403);
+
+        AuditEvents::pdfExport('PregnantLactatingWoman');
 
         return PdfExport::download(
             new PregnantWomenExport($this->exportQuery()),

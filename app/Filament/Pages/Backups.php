@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Support\Activity\AuditEvents;
 use Filament\Pages\Page;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -51,6 +52,8 @@ class Backups extends Page
                 ->action(function (): ?BinaryFileResponse {
                     try {
                         $filePath = $this->createSqlBackup();
+
+                        AuditEvents::backupDownload(basename($filePath), created: true);
 
                         Notification::make()
                             ->title(__('ui.backups.created_title'))
@@ -164,6 +167,8 @@ class Backups extends Page
      */
     public function downloadBackup(string $path): BinaryFileResponse
     {
+        AuditEvents::backupDownload(basename($path));
+
         if (file_exists($path)) {
             return response()->download($path);
         }

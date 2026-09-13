@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ChildResource\Pages;
 
 use App\Events\ExcelActionOccurred;
+use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\ChildrenExport;
 use App\Exports\PdfExport;
@@ -58,6 +59,8 @@ class ListChildren extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('children.export') ?? false, 403);
+
+        AuditEvents::pdfExport('Child');
 
         return PdfExport::download(
             new ChildrenExport($this->exportQuery()),

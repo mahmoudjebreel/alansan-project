@@ -64,6 +64,8 @@ class RolesAndPermissionsSeeder extends Seeder
         'backup.manage',
         'cache.manage',
         'activity.view',
+        // User activity monitoring page (Super Admin only by default)
+        'user_activity.view',
         // Super Admin data-action notifications
         'notifications.manage',
         // Bulk Excel import

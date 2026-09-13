@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\ActivityHeartbeatController;
+use App\Http\Controllers\ActivityPageLeaveController;
 use App\Http\Controllers\SessionKeepAliveController;
 use App\Http\Controllers\SwitchLocaleController;
 use Illuminate\Support\Facades\Route;
@@ -24,3 +26,12 @@ Route::get('/session/keep-alive', SessionKeepAliveController::class)
 
 Route::get('/locale/{locale}', SwitchLocaleController::class)
     ->name('locale.switch');
+
+// User activity monitoring: a visible panel tab reporting in, and a tab
+// being closed. Both answer 401 themselves when the session is gone rather
+// than sitting behind `auth`, for the reason the keep-alive gives.
+Route::post('/activity/heartbeat', ActivityHeartbeatController::class)
+    ->name('activity.heartbeat');
+
+Route::post('/activity/leave', ActivityPageLeaveController::class)
+    ->name('activity.leave');

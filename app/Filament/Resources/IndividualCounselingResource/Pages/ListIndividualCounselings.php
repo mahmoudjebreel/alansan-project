@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\IndividualCounselingResource\Pages;
 
 use App\Events\ExcelActionOccurred;
+use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\IndividualCounselingExport;
 use App\Exports\IndividualCounselingPdfExport;
@@ -47,6 +48,7 @@ class ListIndividualCounselings extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('individual_counseling.export') ?? false, 403);
+        AuditEvents::pdfExport('IndividualCounseling');
         // This module has its own PDF builder: six session groups would be
         // eighteen unreadable extra columns in the shared flat-table report.
         return IndividualCounselingPdfExport::download(

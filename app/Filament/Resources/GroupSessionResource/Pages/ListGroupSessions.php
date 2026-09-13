@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\GroupSessionResource\Pages;
 
 use App\Events\ExcelActionOccurred;
+use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\GroupSessionExport;
 use App\Exports\PdfExport;
@@ -47,6 +48,7 @@ class ListGroupSessions extends ListRecords
     public function downloadPdf()
     {
         abort_unless(auth()->user()?->can('group_sessions.export') ?? false, 403);
+        AuditEvents::pdfExport('GroupSession');
         return PdfExport::download(new GroupSessionExport($this->exportQuery()), 'group-sessions.pdf', __('fields.group_sessions'), 'full_name_ar');
     }
 

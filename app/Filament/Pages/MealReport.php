@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Exports\MealReport\MealReportExport;
 use App\Services\MealReportService;
+use App\Support\Activity\AuditEvents;
 use App\Support\MealReport\MealReportLayout;
 use App\Support\MealReport\ReportPeriod;
 use App\Support\MealReport\SiteVocabulary;
@@ -173,6 +174,8 @@ class MealReport extends Page implements HasForms
         }
 
         $period = $this->period();
+
+        AuditEvents::mealExport((string) $this->site(), $period->filenameSlug());
 
         // One file for the whole window: the months run down each sheet in
         // order, so there is nothing left to merge by hand afterwards.
