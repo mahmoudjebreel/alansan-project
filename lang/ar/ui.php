@@ -245,6 +245,10 @@ return [
         'closed_on' => 'تاريخ الإقفال',
         'readmission_question' => 'هل تريد فتح ملف متابعة جديد لهذا الطفل كإعادة قبول؟ الملف المقفل السابق وزياراته يبقيان كما هما.',
         'readmission_confirm' => 'نعم، إعادة قبول',
+        // The classification the system decided from the child's history,
+        // shown with its reason. Informational: it is never chosen by hand.
+        'classification' => 'التصنيف',
+        'reason' => 'السبب',
     ],
 
     // -----------------------------------------------------------------
@@ -275,6 +279,15 @@ return [
         'not_possible' => 'إعادة القبول غير ممكنة: لهذا الطفل ملف متابعة مفتوح، أو لا يوجد ملف مقفل يُبنى عليه.',
         'done_title' => 'تمت إعادة القبول في متابعة الأطفال',
         'done_body' => 'فُتح ملف متابعة جديد لـ :name كإعادة قبول (:fi). الملف السابق لم يتغير.',
+        // The classification the system decided from the closed episode,
+        // and why. Informational: it is never chosen by hand.
+        'classification_line' => 'التصنيف: :classification.',
+        'reason_line' => 'السبب: :reason',
+        'reasons' => [
+            'defaulted' => 'انتهى ملف المتابعة السابق بنتيجة منقطع.',
+            'other' => 'انتهى ملف المتابعة السابق المؤهل عبر مسار تخريج آخر.',
+            'relapse' => 'أكمل الطفل سابقاً ملف SAM/MAM بنتيجة شُفي ثم عاد لاحقاً بحالة SAM/MAM.',
+        ],
     ],
 
     // -----------------------------------------------------------------
@@ -656,6 +669,8 @@ return [
         'days' => ':count يوم',
         'join' => ' و ',
         'zero' => '0 يوم',
+        // العمر الكامل، مثال: "4 سنة، 4 شهر، 4 يوم"
+        'full' => ':years سنة، :months شهر، :days يوم',
     ],
 
     // صفحة مراقبة نشاط المستخدمين

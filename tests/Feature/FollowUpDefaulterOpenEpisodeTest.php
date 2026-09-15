@@ -21,13 +21,14 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Defaulted is not a closing outcome.
+ * Defaulted is a closing outcome that allows a readmission.
  *
- * A defaulter has missed visits, not left the programme: the episode stays
- * open, the child can come back to it, and the attended/missed history is
- * kept visit by visit. Closing an episode is the work of the other outcomes,
- * and a readmission is allowed only after the three that expect the child
- * back. Non Responded closes and allows none.
+ * A defaulter has left the programme: the episode closes with the date it
+ * closed on, the attended/missed history is kept visit by visit, and a child
+ * who comes back is readmitted into a NEW episode that follows the closed
+ * one - a "readmission after defaulted", starting at visit 1. A readmission
+ * is allowed only after the four outcomes that expect the child back. Non
+ * Responded closes and allows none.
  *
  * The child is the same child throughout, known by ID number, whether the
  * episode on file is open or closed.
@@ -145,70 +146,90 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
     }
 
     // =================================================================
-    // TEST 1 - Defaulter does not close the follow-up case
+    // TEST 1 - Defaulter closes the follow-up case
     // =================================================================
 
-    public function test_defaulter_does_not_close_the_follow_up_case(): void
+    public function test_defaulter_closes_the_follow_up_case(): void
     {
         $record = $this->openEpisode();
 
+        // A closing outcome needs the date it closed on; nothing is invented.
         Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
-            ->fillForm(['discharge_outcome' => 'defaulted'])
+            ->fillForm(['discharge_outcome' => 'defaulted', 'discharge_date' => null])
+            ->call('save')
+            ->assertHasFormErrors(['discharge_date']);
+
+        $this->assertSame(FollowUpChild::ACTIVE_OUTCOME, $record->fresh()->discharge_outcome);
+
+        Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
+            ->fillForm(['discharge_outcome' => 'defaulted', 'discharge_date' => '2026-09-02'])
             ->call('save')
             ->assertHasNoFormErrors();
 
         $record->refresh();
 
-        // The outcome is recorded, and the case is still open.
+        // The outcome is recorded, and the case is closed.
         $this->assertSame('defaulted', $record->discharge_outcome);
-        $this->assertFalse($record->isLocked());
-        $this->assertNotContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
-        $this->assertTrue(ChildFollowUpTransfer::hasOpenEpisode(self::CHILD_ID));
-        $this->assertSame(1, ReferralCandidates::activeFollowUps()->count());
-        $this->assertSame(0, ReferralCandidates::closedFollowUps()->count());
+        $this->assertSame('2026-09-02', $record->discharge_date->format('Y-m-d'));
+        $this->assertTrue($record->isLocked());
+        $this->assertContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
+        $this->assertFalse(ChildFollowUpTransfer::hasOpenEpisode(self::CHILD_ID));
+        $this->assertSame(0, ReferralCandidates::activeFollowUps()->count());
+        $this->assertSame(1, ReferralCandidates::closedFollowUps()->count());
 
         // The existing visits are still there.
         $this->assertCount(2, $record->visits);
         $this->assertSame([1, 2], $record->visits->pluck('visit_number')->all());
 
         Livewire::test(ListFollowUpChildren::class, ['activeTab' => 'active'])
-            ->assertCanSeeTableRecords([$record]);
-        Livewire::test(ListFollowUpChildren::class, ['activeTab' => 'closed'])
             ->assertCanNotSeeTableRecords([$record]);
+        Livewire::test(ListFollowUpChildren::class, ['activeTab' => 'closed'])
+            ->assertCanSeeTableRecords([$record]);
 
-        // The child can continue follow-up in the same case: a locked record
-        // refuses a save, this one takes the next visit.
+        // The closed case is history: a further save is refused, and the
+        // child comes back through a readmission into a new case instead.
+        $before = $this->snapshot($record);
+
         Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
-            ->fillForm([
-                'visits' => [
-                    ['visit_date' => '2026-08-19', 'status' => 'attended', 'muac' => 110],
-                    ['visit_date' => '2026-08-26', 'status' => 'attended', 'muac' => 112],
-                    ['visit_date' => '2026-09-02', 'status' => 'attended', 'muac' => 114],
-                ],
-            ])
+            ->fillForm(['notes' => 'came back'])
             ->call('save')
-            ->assertHasNoFormErrors()
-            ->assertNotNotified(__('fields.record_locked_notice'));
+            ->assertNotified(__('fields.record_locked_notice'));
 
-        $record->refresh();
-
-        $this->assertCount(3, $record->visits);
-        $this->assertSame([1, 2, 3], $record->visits->pluck('visit_number')->all());
-        $this->assertSame(1, FollowUpChild::count(), 'Continuing follow-up opens no second case.');
+        $this->assertSame($before['record'], $this->snapshot($record)['record']);
+        $this->assertSame(1, FollowUpChild::count());
+        $this->assertReadmissionOffered($record->fresh());
     }
 
     // =================================================================
-    // TEST 2 - Defaulter does not show Readmission
+    // TEST 2 - Defaulter shows Readmission, classified after defaulted
     // =================================================================
 
-    public function test_defaulter_does_not_show_readmission(): void
+    public function test_defaulter_shows_readmission(): void
     {
-        $record = $this->episode('defaulted', ['discharge_date' => null]);
+        $record = $this->episode('defaulted');
 
-        $this->assertFalse($record->isLocked());
-        $this->assertFalse($record->isReadmissionEligible());
-        $this->assertReadmissionNotOffered($record);
-        $this->assertNull(FollowUpChild::readmittableEpisodeFor(self::CHILD_ID));
+        $this->assertTrue($record->isLocked());
+        $this->assertTrue($record->isReadmissionEligible());
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_DEFAULTED, $record->classifiesReturnAs());
+        $this->assertReadmissionOffered($record);
+        $this->assertTrue($record->is(FollowUpChild::readmittableEpisodeFor(self::CHILD_ID)));
+
+        // The readmission opens a new case at visit 1, linked to this one,
+        // and this one is left exactly as it was. What the dialog says is
+        // covered by ReadmissionClassificationTest.
+        $before = $this->snapshot($record);
+
+        Livewire::test(ViewFollowUpChild::class, ['record' => $record->getKey()])
+            ->callAction('readmission', data: $this->readmissionData())
+            ->assertHasNoActionErrors();
+
+        $new = FollowUpChild::where('id_number', self::CHILD_ID)->whereKeyNot($record->getKey())->sole();
+
+        $this->assertTrue($new->isReadmission());
+        $this->assertSame($record->getKey(), $new->previous_follow_up_child_id);
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_DEFAULTED, $new->readmissionClassification());
+        $this->assertSame([1], $new->visits->pluck('visit_number')->all());
+        $this->assertSame($before, $this->snapshot($record));
     }
 
     // =================================================================
@@ -453,6 +474,7 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
         Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
             ->fillForm([
                 'discharge_outcome' => 'defaulted',
+                'discharge_date' => '2026-09-09',
                 'visits' => [
                     ['visit_date' => '2026-08-19', 'status' => 'attended', 'muac' => 110],
                     ['visit_date' => '2026-08-26', 'status' => 'missed'],
@@ -466,7 +488,7 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
         $record->refresh();
 
         $this->assertSame('defaulted', $record->discharge_outcome);
-        $this->assertFalse($record->isLocked());
+        $this->assertTrue($record->isLocked());
 
         // Four visits, each as recorded: no visit deleted, none invented.
         $this->assertCount(4, $record->visits);
@@ -494,26 +516,19 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
             ->assertSee(__('fields.visit_outcome_missed'))
             ->assertSee(__('fields.visit_outcome_returned'));
 
-        // The child comes back to the same case: visit 5 is attended, and
-        // the case is still the one case.
+        // The closed case refuses a further save: the child comes back
+        // through a readmission into a new case, not into this one.
+        $before = $this->snapshot($record);
+
         Livewire::test(EditFollowUpChild::class, ['record' => $record->getKey()])
-            ->fillForm([
-                'visits' => [
-                    ['visit_date' => '2026-08-19', 'status' => 'attended', 'muac' => 110],
-                    ['visit_date' => '2026-08-26', 'status' => 'missed'],
-                    ['visit_date' => '2026-09-02', 'status' => 'attended', 'muac' => 112],
-                    ['visit_date' => '2026-09-09', 'status' => 'missed'],
-                    ['visit_date' => '2026-09-16', 'status' => 'attended', 'muac' => 115],
-                ],
-            ])
+            ->fillForm(['notes' => 'came back'])
             ->call('save')
-            ->assertHasNoFormErrors();
+            ->assertNotified(__('fields.record_locked_notice'));
 
         $record->refresh();
 
-        $this->assertCount(5, $record->visits);
-        $this->assertSame('attended', $record->visits[4]->status);
+        $this->assertSame($before['record'], $this->snapshot($record)['record']);
         $this->assertSame(1, FollowUpChild::count());
-        $this->assertFalse($record->canBeReadmitted());
+        $this->assertTrue($record->canBeReadmitted());
     }
 }

@@ -7,6 +7,7 @@ use App\Support\Forms\ReportingDateField;
 use App\Support\RecordSearch;
 use App\Filament\Concerns\AuthorizesModuleActions;
 use App\Filament\Resources\ChildResource\Pages;
+use App\Filament\Resources\FollowUpChildResource;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\Child;
 use App\Models\FollowUpChild;
@@ -140,10 +141,14 @@ class ChildResource extends Resource
                 \Filament\Forms\Components\TextInput::make('organization')
                     ->label(__('fields.organization'))
                     ->default('AEI')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('implementing_partner')
                     ->label(__('fields.implementing_partner'))
                     ->default('SCI')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
@@ -161,6 +166,8 @@ class ChildResource extends Resource
                 \Filament\Forms\Components\TextInput::make('screener_profession')
                     ->label(__('fields.screener_profession'))
                     ->default('CHW')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
             ])->columns(2);
     }
@@ -326,6 +333,12 @@ class ChildResource extends Resource
      */
     private static function announceFollowUpHistory(object $livewire, mixed $childId, ?FollowUpChild $episode): void
     {
+        // Decided by the latest closed episode, and only while none is open:
+        // the same reading the transfer makes when it opens the episode.
+        $classification = $episode !== null && $episode->isLocked()
+            ? FollowUpChild::readmissionClassificationFor($childId)
+            : null;
+
         $livewire->dispatch('follow-up-history-known', [
             'child_id' => (string) $childId,
             'state' => match (true) {
@@ -340,6 +353,11 @@ class ChildResource extends Resource
             // Whether a new episode would be a readmission: only after one of
             // the outcomes that allow it, never merely because it is closed.
             'readmission' => $episode?->canBeReadmitted() ?? false,
+            // How a new episode would be classified - after defaulted, after
+            // other, after relapse - and why, decided by the closed episode
+            // on file; null when a new episode would be a first admission.
+            'classification' => FollowUpChildResource::readmissionClassificationLabel($classification),
+            'reason' => $classification !== null ? __('ui.readmission.reasons.' . $classification) : null,
         ]);
     }
 
@@ -470,11 +488,15 @@ class ChildResource extends Resource
             ->schema([
                 \Filament\Forms\Components\TextInput::make('governorate')
                     ->label(__('fields.governorate'))
-                    ->default('gaza')
+                    ->default('Gaza')
+                    ->disabled()
+                    ->dehydrated()
                     ->required(),
                 \Filament\Forms\Components\TextInput::make('municipality')
                     ->label(__('fields.municipality'))
-                    ->default('gaza')
+                    ->default('Gaza')
+                    ->disabled()
+                    ->dehydrated()
                     ->required(),
                 \Filament\Forms\Components\TextInput::make('neighbourhood')
                     ->label(__('fields.neighbourhood'))
@@ -766,6 +788,7 @@ class ChildResource extends Resource
             'sex',
             'governorate',
             'date_of_reporting',
+            'date_of_birth',
             'is_displaced',
             'is_pwd',
             'has_oedema',
@@ -818,6 +841,28 @@ class ChildResource extends Resource
                     ->label(__('fields.date_of_reporting'))
                     ->date()
                     ->sortable(),
+                // Display only: the age the child was on the record's own
+                // reporting date, read from the two dates rather than from the
+                // stored age_months, which is left exactly as it is.
+                Tables\Columns\TextColumn::make('age')
+                    ->label(__('fields.age'))
+                    ->state(function (Child $record): ?string {
+                        $dob = $record->date_of_birth;
+                        $reference = $record->date_of_reporting;
+
+                        if (! $dob || ! $reference || $reference->lt($dob)) {
+                            return null;
+                        }
+
+                        $diff = $dob->diff($reference);
+
+                        return __('ui.age.full', [
+                            'years' => $diff->y,
+                            'months' => $diff->m,
+                            'days' => $diff->d,
+                        ]);
+                    })
+                    ->toggleable(isToggledHiddenByDefault: true),
                 YesNoColumn::make('is_displaced')
                     ->label(__('fields.is_displaced')),
                 YesNoColumn::make('is_pwd')

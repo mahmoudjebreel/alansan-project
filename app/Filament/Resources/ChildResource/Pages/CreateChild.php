@@ -42,6 +42,12 @@ class CreateChild extends CreateRecord
         $childData = isset($data['data']) && is_array($data['data']) ? $data['data'] : $data;
 
         $this->form->fill(array_merge($childData, [
+            // Locked fields keep their fixed values whatever the old record holds.
+            'governorate' => 'Gaza',
+            'municipality' => 'Gaza',
+            'organization' => 'AEI',
+            'implementing_partner' => 'SCI',
+            'screener_profession' => 'CHW',
             // No MUAC yet, so this stays "follow up" until the user enters one
             // and the relapse check re-derives it.
             'visit_type' => ChildDuplicateChecker::resolveVisitType($childData['child_id'] ?? null),

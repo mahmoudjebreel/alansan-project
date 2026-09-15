@@ -73,6 +73,30 @@ class FollowUpChildResource extends Resource
     }
 
     /**
+     * The three readmission classifications, by the value the model decides.
+     *
+     * @return array<string, string>
+     */
+    public static function readmissionClassificationOptions(): array
+    {
+        return [
+            FollowUpChild::READMISSION_AFTER_DEFAULTED => __('fields.readmission_after_defaulted'),
+            FollowUpChild::READMISSION_AFTER_OTHER => __('fields.readmission_after_other'),
+            FollowUpChild::READMISSION_AFTER_RELAPSE => __('fields.readmission_after_relapse'),
+        ];
+    }
+
+    /**
+     * The label for a classification, or null when there is none to name.
+     */
+    public static function readmissionClassificationLabel(?string $classification): ?string
+    {
+        return $classification === null
+            ? null
+            : (static::readmissionClassificationOptions()[$classification] ?? null);
+    }
+
+    /**
      * @return array<string, string>
      */
     public static function visitStatusOptions(): array
@@ -241,6 +265,8 @@ class FollowUpChildResource extends Resource
                 Forms\Components\TextInput::make('causes_of_admission')
                     ->label(__('fields.causes_of_admission'))
                     ->default('malnutrition')
+                    ->disabled()
+                    ->dehydrated()
                     ->required()
                     ->maxLength(255),
                 Forms\Components\Select::make('admitted_with')
@@ -261,9 +287,14 @@ class FollowUpChildResource extends Resource
                     ->placeholder(__('fields.admission_new'))
                     ->disabled()
                     ->dehydrated(false),
+                // A closing outcome needs the date it closed on: the closed
+                // history is ordered by it, and the reports count the
+                // discharge in its month. Nothing is filled in on the
+                // person's behalf - they are asked for it.
                 Forms\Components\DatePicker::make('discharge_date')
                     ->label(__('fields.discharge_date'))
-                    ->rules(['date']),
+                    ->rules(['date'])
+                    ->requiredIf('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES),
                 Forms\Components\Select::make('discharge_outcome')
                     ->label(__('fields.discharge_outcome'))
                     ->options(static::dischargeOutcomeOptions()),
@@ -367,6 +398,15 @@ class FollowUpChildResource extends Resource
                         ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->admissionType()])
                         ->badge()
                         ->color(fn (FollowUpChild $record): string => $record->isReadmission() ? 'warning' : 'info'),
+                    // After defaulted, after other, or after relapse - read
+                    // from the closed episode this one is linked to. Shown
+                    // only when there is one to read.
+                    TextEntry::make('readmission_classification')
+                        ->label(__('fields.readmission_classification'))
+                        ->state(fn (FollowUpChild $record): ?string => static::readmissionClassificationLabel($record->readmissionClassification()))
+                        ->badge()
+                        ->color('warning')
+                        ->visible(fn (FollowUpChild $record): bool => $record->readmissionClassification() !== null),
                     FilamentInfolist::date('admission_date'),
                     FilamentInfolist::date('discharge_date'),
                     FilamentInfolist::enum('discharge_outcome'),

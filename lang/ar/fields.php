@@ -49,8 +49,8 @@ return [
     'has_stable_income' => 'مصدر دخل ثابت',
     'income_source' => 'مصدر دخل الأسرة',
     'is_income_below_500' => 'الدخل أقل من 500 شيكل',
-    'male_children_under_5' => 'عدد الذكور أقل من 5 سنوات',
-    'female_children_under_5' => 'عدد الإناث أقل من 5 سنوات',
+    'male_children_under_5' => 'عدد الأطفال الذكور أقل من 6 أشهر',
+    'female_children_under_5' => 'عدد الأطفال الإناث أقل من 6 أشهر',
     'family_size' => 'عدد أفراد الأسرة',
     'current_address' => 'عنوان السكن الحالي',
     'original_address' => 'عنوان السكن الأصلي',
@@ -296,6 +296,12 @@ return [
     'admission_type' => 'نوع القبول',
     'admission_new' => 'قبول جديد',
     'readmission' => 'إعادة قبول',
+    // How a readmission is classified, decided by the system from the
+    // closed episode it follows - never picked by hand.
+    'readmission_classification' => 'تصنيف إعادة القبول',
+    'readmission_after_defaulted' => 'إعادة قبول بعد انقطاع',
+    'readmission_after_other' => 'إعادة قبول بعد تخريج آخر',
+    'readmission_after_relapse' => 'إعادة قبول بعد انتكاسة',
     'visit_status' => 'حالة الزيارة',
     'visit_attended' => 'حضر',
     'visit_missed' => 'لم يحضر',

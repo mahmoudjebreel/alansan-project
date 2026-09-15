@@ -58,6 +58,17 @@ final class ReadmissionAction
                             'outcome' => __('fields.' . $record->discharge_outcome),
                             'date' => $record->discharge_date?->format('Y-m-d') ?? '-',
                         ])),
+                        // The classification the system decided from this
+                        // closed episode, and why. Said, not asked: the
+                        // person confirms the readmission, never its kind.
+                        Text::make(__('ui.readmission.classification_line', [
+                            'classification' => FollowUpChildResource::readmissionClassificationLabel($record->classifiesReturnAs()) ?? '-',
+                        ]))->weight('bold'),
+                        Text::make(__('ui.readmission.reason_line', [
+                            'reason' => $record->classifiesReturnAs() !== null
+                                ? __('ui.readmission.reasons.' . $record->classifiesReturnAs())
+                                : '-',
+                        ])),
                         Text::make(__('ui.readmission.visits_line', [
                             'count' => $record->visits()->count(),
                         ])),

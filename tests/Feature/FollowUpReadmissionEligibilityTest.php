@@ -24,9 +24,11 @@ use Tests\TestCase;
  * Which closed episodes allow a readmission.
  *
  * The rule is the discharge outcome of the closed episode and nothing else.
- * Three outcomes allow one - discharge to OTP, discharge to other, referred
- * for a medical reason - and every other closed outcome does not, however
- * closed the record is. Being closed is never the test.
+ * Four outcomes allow one - defaulted, discharge to OTP, discharge to other,
+ * referred for a medical reason - and every other closed outcome does not,
+ * however closed the record is. Being closed is never the test. A cured
+ * SAM/MAM child who deteriorates again is a relapse: a new admission linked
+ * to the cured episode, raised from a screening and never from the button.
  *
  * The rest of the feature is covered by FollowUpReadmissionAndVisitHistoryTest;
  * this file defends the eligibility line and what a readmission leaves behind.
@@ -37,8 +39,8 @@ class FollowUpReadmissionEligibilityTest extends TestCase
 
     private const CHILD_ID = '470828468';
 
-    /** The three outcomes the rule allows, and nothing else. */
-    private const ELIGIBLE = ['discharge_to_opt', 'discharge_to_other', 'referred_medical_inpt'];
+    /** The four outcomes the rule allows, and nothing else. */
+    private const ELIGIBLE = ['defaulted', 'discharge_to_opt', 'discharge_to_other', 'referred_medical_inpt'];
 
     /** Closed outcomes that never allow a readmission. */
     private const INELIGIBLE = ['cured', 'non_responded', 'died'];
@@ -167,14 +169,15 @@ class FollowUpReadmissionEligibilityTest extends TestCase
     }
 
     /** TEST 4 */
-    public function test_readmission_is_not_offered_to_a_defaulter(): void
+    public function test_readmission_is_offered_to_a_defaulter(): void
     {
-        // A defaulter's episode is not closed at all: it stays open for the
-        // child to come back to, so there is nothing to readmit from.
-        $record = $this->closedEpisode('defaulted', ['discharge_date' => null]);
+        // A defaulter has left the programme: the episode is closed, and a
+        // child who comes back is readmitted into a new one that follows it.
+        $record = $this->closedEpisode('defaulted');
 
-        $this->assertFalse($record->isLocked());
-        $this->assertNotOffered($record);
+        $this->assertTrue($record->isLocked());
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_DEFAULTED, $record->classifiesReturnAs());
+        $this->assertOffered($record);
     }
 
     /** TEST 5 */
@@ -203,7 +206,7 @@ class FollowUpReadmissionEligibilityTest extends TestCase
 
     /**
      * "Closed" is never the test: every closing outcome locks the record, and
-     * only the three named ones allow a readmission.
+     * only the four named ones allow a readmission.
      */
     public function test_eligibility_is_decided_by_the_outcome_and_never_by_being_closed(): void
     {
@@ -226,9 +229,9 @@ class FollowUpReadmissionEligibilityTest extends TestCase
             $this->assertNotContains($outcome, FollowUpChild::READMISSION_OUTCOMES);
         }
 
-        // Defaulted neither closes the episode nor allows a readmission.
-        $this->assertNotContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
-        $this->assertNotContains('defaulted', FollowUpChild::READMISSION_OUTCOMES);
+        // Defaulted both closes the episode and allows a readmission.
+        $this->assertContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
+        $this->assertContains('defaulted', FollowUpChild::READMISSION_OUTCOMES);
     }
 
     public function test_readmission_is_not_offered_again_once_the_new_episode_is_open(): void
@@ -430,6 +433,8 @@ class FollowUpReadmissionEligibilityTest extends TestCase
 
     public function test_a_screening_after_an_ineligible_closed_episode_is_a_first_admission_not_a_readmission(): void
     {
+        // Cured SAM/MAM: a relapse. Not a readmission, but a new admission
+        // linked to the cured episode so the reports can tell it apart.
         $cured = $this->closedEpisode('cured');
         $before = $this->snapshot($cured);
 
@@ -439,8 +444,24 @@ class FollowUpReadmissionEligibilityTest extends TestCase
 
         $this->assertNotNull($episode);
         $this->assertFalse($episode->isReadmission());
-        $this->assertNull($episode->previous_follow_up_child_id);
+        $this->assertSame(FollowUpChild::ADMISSION_NEW, $episode->admissionType());
+        $this->assertSame($cured->getKey(), $episode->previous_follow_up_child_id);
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $episode->readmissionClassification());
         $this->assertSame($before, $this->snapshot($cured));
+
+        // Non-responded: a first admission with nothing to follow on from.
+        $nonResponded = $this->closedEpisode('non_responded', ['id_number' => '470828480']);
+        $before = $this->snapshot($nonResponded);
+
+        $child = Child::factory()->create(['child_id' => '470828480', 'muac_mm' => 110, 'date_of_reporting' => '2026-09-09']);
+
+        $episode = ChildFollowUpTransfer::refer($child);
+
+        $this->assertNotNull($episode);
+        $this->assertFalse($episode->isReadmission());
+        $this->assertNull($episode->previous_follow_up_child_id);
+        $this->assertNull($episode->readmissionClassification());
+        $this->assertSame($before, $this->snapshot($nonResponded));
     }
 
     public function test_a_screening_after_an_eligible_closed_episode_is_a_readmission(): void

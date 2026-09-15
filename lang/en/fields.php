@@ -294,6 +294,12 @@ return [
     'admission_type' => 'Admission type',
     'admission_new' => 'New admission',
     'readmission' => 'Readmission',
+    // How a readmission is classified, decided by the system from the
+    // closed episode it follows - never picked by hand.
+    'readmission_classification' => 'Readmission classification',
+    'readmission_after_defaulted' => 'Readmission after Defaulted',
+    'readmission_after_other' => 'Readmission after Other',
+    'readmission_after_relapse' => 'Readmission after Relapse',
     'visit_status' => 'Visit status',
     'visit_attended' => 'Attended',
     'visit_missed' => 'Missed',

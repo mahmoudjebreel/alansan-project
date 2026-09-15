@@ -155,6 +155,150 @@ class MealCmamReportTest extends TestCase
         $this->assertSame(0, $september['mam_adm_6_23_relapse_male']);
     }
 
+    // =================================================================
+    // Readmission classification: after defaulted and after other land in
+    // Readmission, after relapse in Relapse admission, and never in New.
+    // Each of these is a two-episode child: the original episode keeps its
+    // own admission and discharge, the returned one is its own admission.
+    // =================================================================
+
+    public function test_a_readmission_after_defaulted_is_counted_under_readmission_not_new(): void
+    {
+        $previous = $this->closedEpisode('SAM', 'defaulted', '500000010');
+
+        $readmission = ChildFollowUpTransfer::readmitFromEpisode($previous, [
+            'admission_date' => '2026-09-05', 'visit_date' => '2026-09-05', 'muac' => 110,
+        ]);
+
+        $this->assertNotNull($readmission);
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_DEFAULTED, $readmission->readmissionClassification());
+        $this->assertSame([1], $readmission->visits->pluck('visit_number')->all());
+
+        $sheet = $this->sheet(self::AUGUST, self::SEPTEMBER);
+        $august = $sheet['monthTotals'][self::AUGUST];
+        $september = $sheet['monthTotals'][self::SEPTEMBER];
+
+        // The original episode: New in August, defaulted in August.
+        $this->assertSame(1, $august['sam_adm_6_23_new_male']);
+        $this->assertSame(1, $august['sam_dis_defaulted_6_23_male']);
+
+        // The returned episode: Readmission in September, and nothing else.
+        $this->assertSame(1, $september['sam_adm_6_23_readmission_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_new_male'], 'Visit 1 of a readmission is not a New admission.');
+        $this->assertSame(0, $september['sam_adm_6_23_relapse_male']);
+
+        $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'), 'Two episodes, two admissions, no more.');
+    }
+
+    public function test_a_readmission_after_other_is_counted_under_readmission_not_new(): void
+    {
+        $previous = $this->closedEpisode('MAM', 'discharge_to_other', '500000011');
+
+        $readmission = ChildFollowUpTransfer::readmitFromEpisode($previous, [
+            'admission_date' => '2026-09-05', 'visit_date' => '2026-09-05', 'muac' => 118,
+        ]);
+
+        $this->assertNotNull($readmission);
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_OTHER, $readmission->readmissionClassification());
+
+        $sheet = $this->sheet(self::AUGUST, self::SEPTEMBER);
+        $august = $sheet['monthTotals'][self::AUGUST];
+        $september = $sheet['monthTotals'][self::SEPTEMBER];
+
+        $this->assertSame(1, $august['mam_adm_6_23_new_male']);
+        $this->assertSame(1, $august['mam_dis_other_6_23_male']);
+
+        $this->assertSame(1, $september['mam_adm_6_23_readmission_male']);
+        $this->assertSame(0, $september['mam_adm_6_23_new_male']);
+        $this->assertSame(0, $september['mam_adm_6_23_relapse_male']);
+
+        $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'));
+    }
+
+    public function test_a_relapse_after_a_cured_sam_episode_is_counted_under_relapse_not_new(): void
+    {
+        $this->assertRelapseCounted('SAM', 110, '500000012');
+    }
+
+    public function test_a_relapse_after_a_cured_mam_episode_is_counted_under_relapse_not_new(): void
+    {
+        $this->assertRelapseCounted('MAM', 118, '500000013');
+    }
+
+    public function test_a_new_episode_after_non_responded_is_counted_under_new(): void
+    {
+        Carbon::setTestNow('2026-09-05');
+
+        $this->closedEpisode('SAM', 'non_responded', '500000014');
+
+        $episode = ChildFollowUpTransfer::refer($this->screening([
+            'child_id' => '500000014', 'sex' => 'M', 'muac_mm' => 110, 'has_oedema' => false,
+        ]));
+
+        $this->assertNotNull($episode);
+        $this->assertNull($episode->previous_follow_up_child_id);
+        $this->assertNull($episode->readmissionClassification());
+
+        $sheet = $this->sheet(self::AUGUST, self::SEPTEMBER);
+        $september = $sheet['monthTotals'][self::SEPTEMBER];
+
+        $this->assertSame(1, $september['sam_adm_6_23_new_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_relapse_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_readmission_male']);
+        $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'));
+    }
+
+    public function test_a_cured_episode_with_no_sam_mam_classification_makes_no_relapse(): void
+    {
+        Carbon::setTestNow('2026-09-05');
+
+        // A Normal readmission closed as cured: admitted with neither SAM nor
+        // MAM, so a later SAM screening has no SAM/MAM episode to relapse from.
+        $this->episode([
+            'id_number' => '500000015', 'admitted_with' => null, 'sex' => 'M', 'dob' => '2025-08-01',
+            'admission_date' => '2026-08-01', 'discharge_date' => '2026-08-20', 'discharge_outcome' => 'cured',
+        ]);
+
+        $episode = ChildFollowUpTransfer::refer($this->screening([
+            'child_id' => '500000015', 'sex' => 'M', 'muac_mm' => 110, 'has_oedema' => false,
+        ]));
+
+        $this->assertNotNull($episode);
+        $this->assertNull($episode->previous_follow_up_child_id);
+        $this->assertNull($episode->readmissionClassification());
+
+        $september = $this->sheet(self::SEPTEMBER, self::SEPTEMBER)['monthTotals'][self::SEPTEMBER];
+
+        $this->assertSame(1, $september['sam_adm_6_23_new_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_relapse_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_readmission_male']);
+    }
+
+    public function test_an_unlinked_episode_after_a_non_responded_episode_is_new_not_relapse(): void
+    {
+        // A row written before the link existed, after an earlier cured
+        // episode AND a later non-responded one: the latest closed episode
+        // before it decides, and non-responded makes it a new admission.
+        $this->episode([
+            'id_number' => '500000016', 'admitted_with' => 'SAM', 'sex' => 'M', 'dob' => '2025-08-01',
+            'admission_date' => '2026-05-01', 'discharge_date' => '2026-05-29', 'discharge_outcome' => 'cured',
+        ]);
+        $this->episode([
+            'id_number' => '500000016', 'admitted_with' => 'SAM', 'sex' => 'M', 'dob' => '2025-08-01',
+            'admission_date' => '2026-06-15', 'discharge_date' => '2026-07-20', 'discharge_outcome' => 'non_responded',
+        ]);
+        $this->episode([
+            'id_number' => '500000016', 'admitted_with' => 'SAM', 'sex' => 'M', 'dob' => '2025-08-01',
+            'admission_date' => '2026-09-05', 'admission_type' => FollowUpChild::ADMISSION_NEW,
+        ]);
+
+        $september = $this->sheet(self::SEPTEMBER, self::SEPTEMBER)['monthTotals'][self::SEPTEMBER];
+
+        $this->assertSame(1, $september['sam_adm_6_23_new_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_relapse_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_readmission_male']);
+    }
+
     public function test_sam_new_admission_is_counted_under_new_by_age_and_sex(): void
     {
         $this->episode(['admitted_with' => 'SAM', 'sex' => 'F', 'age' => 8, 'admission_date' => '2026-08-05']);
@@ -839,6 +983,44 @@ class MealCmamReportTest extends TestCase
         }
 
         return $total;
+    }
+
+    /**
+     * A cured SAM/MAM episode in August, then the same child screened at
+     * the programme again in September: the transfer opens a relapse -
+     * a new admission linked to the cured episode - and the report counts
+     * it under Relapse admission, the cure under Recovered, and nothing
+     * twice.
+     */
+    private function assertRelapseCounted(string $programme, int $muac, string $idNumber): void
+    {
+        Carbon::setTestNow('2026-09-05');
+
+        $cured = $this->closedEpisode($programme, 'cured', $idNumber);
+
+        $relapse = ChildFollowUpTransfer::refer($this->screening([
+            'child_id' => $idNumber, 'sex' => 'M', 'muac_mm' => $muac, 'has_oedema' => false,
+        ]));
+
+        $this->assertNotNull($relapse);
+        $this->assertFalse($relapse->isReadmission());
+        $this->assertSame($cured->getKey(), $relapse->previous_follow_up_child_id);
+        $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $relapse->readmissionClassification());
+        $this->assertSame([1], $relapse->visits->pluck('visit_number')->all());
+
+        $prefix = strtolower($programme);
+        $sheet = $this->sheet(self::AUGUST, self::SEPTEMBER);
+        $august = $sheet['monthTotals'][self::AUGUST];
+        $september = $sheet['monthTotals'][self::SEPTEMBER];
+
+        $this->assertSame(1, $august["{$prefix}_adm_6_23_new_male"]);
+        $this->assertSame(1, $august["{$prefix}_dis_recovered_6_23_male"]);
+
+        $this->assertSame(1, $september["{$prefix}_adm_6_23_relapse_male"]);
+        $this->assertSame(0, $september["{$prefix}_adm_6_23_new_male"], 'Visit 1 of a relapse is not a New admission.');
+        $this->assertSame(0, $september["{$prefix}_adm_6_23_readmission_male"]);
+
+        $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'), 'Two episodes, two admissions, no more.');
     }
 
     private function assertDischargeCounted(string $programme, string $stored, string $column): void

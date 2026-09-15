@@ -136,10 +136,14 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('organization')
                     ->label(__('fields.organization'))
                     ->default('AEI')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
                 \Filament\Forms\Components\TextInput::make('implementing_partner')
                     ->label(__('fields.implementing_partner'))
                     ->default('SCI')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
                 \Filament\Forms\Components\DatePicker::make('date_of_reporting')
                     ->label(__('fields.date_of_reporting'))
@@ -157,23 +161,39 @@ class PregnantLactatingWomanResource extends Resource
                 \Filament\Forms\Components\TextInput::make('screener_profession')
                     ->label(__('fields.screener_profession'))
                     ->default('CHW')
+                    ->disabled()
+                    ->dehydrated()
                     ->maxLength(255),
             ])->columns(2);
     }
 
     /**
      * Recompute the locked visit type from the mother ID and the
-     * pregnant/lactating status entered for this visit. Only meaningful while
-     * creating a record: an existing record keeps the visit type it was saved
-     * with.
+     * pregnant/lactating status entered for this visit.
+     *
+     * Runs while creating and while editing: a status corrected on an existing
+     * record is measured against the mother's other active visits with the
+     * very same rule a new entry uses. The record being edited is left out of
+     * that history so it can never count as its own previous visit.
      */
     public static function syncVisitType(Get $get, Set $set, $livewire): void
     {
-        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+        if (
+            ! $livewire instanceof \Filament\Resources\Pages\CreateRecord
+            && ! $livewire instanceof \Filament\Resources\Pages\EditRecord
+        ) {
             return;
         }
 
-        $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType($get('mother_id'), $get('status_type')));
+        $ignoreRecord = (isset($livewire->record) && $livewire->record instanceof \Illuminate\Database\Eloquent\Model)
+            ? $livewire->record
+            : null;
+
+        $set('visit_type', PregnantWomanDuplicateChecker::resolveVisitType(
+            $get('mother_id'),
+            $get('status_type'),
+            $ignoreRecord,
+        ));
     }
 
     public static function checkDuplicateMother(Get $get, Set $set, $livewire): void
@@ -344,11 +364,15 @@ class PregnantLactatingWomanResource extends Resource
             ->schema([
                 \Filament\Forms\Components\TextInput::make('governorate')
                     ->label(__('fields.governorate'))
-                    ->default('gaza')
+                    ->default('Gaza')
+                    ->disabled()
+                    ->dehydrated()
                     ->required(),
                 \Filament\Forms\Components\TextInput::make('municipality')
                     ->label(__('fields.municipality'))
-                    ->default('gaza')
+                    ->default('Gaza')
+                    ->disabled()
+                    ->dehydrated()
                     ->required(),
                 \Filament\Forms\Components\Select::make('neighbourhood')
                     ->label(__('fields.neighbourhood'))
@@ -572,6 +596,7 @@ class PregnantLactatingWomanResource extends Resource
             'visit_type',
             'governorate',
             'date_of_reporting',
+            'date_of_birth',
             'muac_mm',
             'is_displaced',
             'is_pwd',
@@ -619,6 +644,28 @@ class PregnantLactatingWomanResource extends Resource
                     ->label(__('fields.date_of_reporting'))
                     ->date()
                     ->sortable(),
+                // Display only: the age the woman was on the record's own
+                // reporting date, read from the two dates rather than from the
+                // stored age_years, which is left exactly as it is.
+                Tables\Columns\TextColumn::make('age')
+                    ->label(__('fields.age'))
+                    ->state(function (PregnantLactatingWoman $record): ?string {
+                        $dob = $record->date_of_birth;
+                        $reference = $record->date_of_reporting;
+
+                        if (! $dob || ! $reference || $reference->lt($dob)) {
+                            return null;
+                        }
+
+                        $diff = $dob->diff($reference);
+
+                        return __('ui.age.full', [
+                            'years' => $diff->y,
+                            'months' => $diff->m,
+                            'days' => $diff->d,
+                        ]);
+                    })
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('muac_mm')
                     ->label(__('fields.muac_mm'))
                     ->numeric()

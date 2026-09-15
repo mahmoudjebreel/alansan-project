@@ -25,6 +25,12 @@ class CreatePregnantLactatingWoman extends CreateRecord
         $motherData = isset($data['data']) && is_array($data['data']) ? $data['data'] : $data;
 
         $this->form->fill(array_merge($motherData, [
+            // Locked fields keep their fixed values whatever the old record holds.
+            'governorate' => 'Gaza',
+            'municipality' => 'Gaza',
+            'organization' => 'AEI',
+            'implementing_partner' => 'SCI',
+            'screener_profession' => 'CHW',
             'status_type' => null,
             'newborn_dob' => null,
             'weight_kg' => null,

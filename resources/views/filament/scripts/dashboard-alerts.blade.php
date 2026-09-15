@@ -304,6 +304,15 @@
                     + window.dashboardDialogRow(t.closed_on, history.discharge_date ?? "-", "#6b7280");
             }
 
+            // The classification the server decided from the child's history
+            // - after defaulted, after other, after relapse - and why. A
+            // relapse follows a cured episode, which is not a readmission, so
+            // it is shown here whether or not the readmission rows are.
+            if (history !== null && history.state === "closed" && history.classification) {
+                historyHtml += window.dashboardDialogRow(t.classification, history.classification, "#b45309")
+                    + window.dashboardDialogRow(t.reason, history.reason ?? "-", "#6b7280");
+            }
+
             return Swal.fire({
                 title: readmission
                     ? t.readmission_title

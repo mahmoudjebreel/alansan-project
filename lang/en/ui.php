@@ -240,6 +240,10 @@ return [
         'closed_on' => 'Closed on',
         'readmission_question' => 'Open a NEW follow-up case for this child as a readmission? The previous closed case and its visits stay exactly as they are.',
         'readmission_confirm' => 'Yes, readmission',
+        // The classification the system decided from the child's history,
+        // shown with its reason. Informational: it is never chosen by hand.
+        'classification' => 'Classification',
+        'reason' => 'Reason',
     ],
 
     // -----------------------------------------------------------------
@@ -270,6 +274,15 @@ return [
         'not_possible' => 'Readmission is not possible: the child has an open follow-up case, or has no closed one to follow.',
         'done_title' => 'Readmitted to Follow Up Children',
         'done_body' => 'A new follow-up case was opened for :name as a readmission (:fi). The previous case is unchanged.',
+        // The classification the system decided from the closed episode,
+        // and why. Informational: it is never chosen by hand.
+        'classification_line' => 'Classification: :classification.',
+        'reason_line' => 'Reason: :reason',
+        'reasons' => [
+            'defaulted' => 'The previous Follow-Up episode ended as Defaulter.',
+            'other' => 'The previous eligible Follow-Up episode ended through the Other pathway.',
+            'relapse' => 'The child previously completed a SAM/MAM episode with Cured outcome and later returned as SAM/MAM.',
+        ],
     ],
 
     // -----------------------------------------------------------------
@@ -646,6 +659,8 @@ return [
         'days' => ':count days',
         'join' => ' and ',
         'zero' => '0 days',
+        // Complete age, e.g. "4 years, 4 months, 4 days"
+        'full' => ':years years, :months months, :days days',
     ],
 
     // User activity monitoring page

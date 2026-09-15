@@ -5,6 +5,7 @@ namespace App\Models;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Support\MuacClassifier;
 use App\Traits\NotifiesSuperAdminOnChange;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -32,17 +33,25 @@ class FollowUpChild extends Model
     public const CURED_OUTCOME = 'cured';
 
     /**
+     * The outcome a person records when the child has missed two consecutive
+     * visits - the programme's defaulter rule.
+     */
+    public const DEFAULTED_OUTCOME = 'defaulted';
+
+    /**
      * Outcomes that close a record. A closed record is read-only: the child
      * has left the programme and the history of that episode must not move.
      *
-     * 'defaulted' is deliberately not one of them. A defaulter has missed
-     * visits, not left the programme: the episode stays open, the child may
-     * come back to it, and the missed visits stay recorded visit by visit.
+     * 'defaulted' closes the record like the others: a defaulter has left
+     * the programme, the missed visits stay recorded visit by visit, and a
+     * child who comes back is readmitted into a NEW episode that follows
+     * this one - never into this one.
      *
      * @var array<string>
      */
     public const CLOSING_OUTCOMES = [
         self::CURED_OUTCOME,
+        self::DEFAULTED_OUTCOME,
         'discharge_to_opt',
         'discharge_to_other',
         'non_responded',
@@ -55,15 +64,55 @@ class FollowUpChild extends Model
      * into a new episode: the exits after which the child is expected back.
      *
      * Closed is not the test. Cured, non-responded and died all close a
-     * record just the same and never allow a readmission; a defaulter's
-     * record is not even closed, and never allows one either.
+     * record just the same and never allow a readmission. A cured child who
+     * deteriorates again is a relapse - a new admission that follows the
+     * cured episode - and is raised from a Children screening, never from
+     * the readmission button.
      *
      * @var array<string>
      */
     public const READMISSION_OUTCOMES = [
+        self::DEFAULTED_OUTCOME,
         'discharge_to_opt',
         'discharge_to_other',
         'referred_medical_inpt',
+    ];
+
+    /**
+     * The outcomes that make a readmission a "Readmission after Other": the
+     * eligible discharges that are neither a default nor a cure.
+     *
+     * @var array<string>
+     */
+    public const OTHER_READMISSION_OUTCOMES = [
+        'discharge_to_opt',
+        'discharge_to_other',
+        'referred_medical_inpt',
+    ];
+
+    /**
+     * How an episode that follows a closed one is classified, decided from
+     * the closed episode's own history and never picked by hand.
+     *
+     * The classification is a property of the closed episode: it says what
+     * a return after it is. It is stored on the new episode only as the
+     * link previous_follow_up_child_id, which is what the reports read.
+     *
+     *   defaulted  the previous episode closed as defaulted
+     *   other      the previous episode closed by an eligible other exit
+     *   relapse    the previous episode was a SAM/MAM episode closed as cured
+     */
+    public const READMISSION_AFTER_DEFAULTED = 'defaulted';
+
+    public const READMISSION_AFTER_OTHER = 'other';
+
+    public const READMISSION_AFTER_RELAPSE = 'relapse';
+
+    /** @var array<string> */
+    public const READMISSION_CLASSIFICATIONS = [
+        self::READMISSION_AFTER_DEFAULTED,
+        self::READMISSION_AFTER_OTHER,
+        self::READMISSION_AFTER_RELAPSE,
     ];
 
     /**
@@ -160,6 +209,94 @@ class FollowUpChild extends Model
         $previous = static::latestClosedEpisodeFor($idNumber);
 
         return $previous?->canBeReadmitted() ? $previous : null;
+    }
+
+    /**
+     * What an episode opened after this closed one is classified as, or null
+     * when a return after this episode is simply a new admission.
+     *
+     * Decided by this episode's own outcome and admission, in this order:
+     *
+     *   1. closed as defaulted                        -> after defaulted
+     *   2. closed by an eligible other exit           -> after other
+     *   3. a SAM/MAM episode closed as cured          -> after relapse
+     *   4. anything else - cured with no SAM/MAM classification, non-responded,
+     *      died, or not closed at all                 -> null (a new admission)
+     *
+     * A cure is sufficient evidence for a relapse on its own: a Children
+     * row written back from the cure is not required, because an episode
+     * closed as cured by the import never has one until somebody refers it.
+     */
+    public function classifiesReturnAs(): ?string
+    {
+        if (! $this->isLocked()) {
+            return null;
+        }
+
+        if ($this->discharge_outcome === self::DEFAULTED_OUTCOME) {
+            return self::READMISSION_AFTER_DEFAULTED;
+        }
+
+        if (in_array($this->discharge_outcome, self::OTHER_READMISSION_OUTCOMES, true)) {
+            return self::READMISSION_AFTER_OTHER;
+        }
+
+        if ($this->discharge_outcome === self::CURED_OUTCOME
+            && MuacClassifier::isMalnourished($this->admitted_with)) {
+            return self::READMISSION_AFTER_RELAPSE;
+        }
+
+        return null;
+    }
+
+    /**
+     * This episode's own readmission classification - after defaulted, after
+     * other, after relapse - read from the closed episode it is linked to,
+     * or null for a first admission and for every row written before the
+     * link existed.
+     *
+     * The linked episode is read even from the trash: the classification was
+     * settled when this episode was opened, and trashing the history later
+     * must not change what this episode is.
+     */
+    public function readmissionClassification(): ?string
+    {
+        if (blank($this->previous_follow_up_child_id)) {
+            return null;
+        }
+
+        return static::withTrashed()
+            ->find($this->previous_follow_up_child_id)
+            ?->classifiesReturnAs();
+    }
+
+    /**
+     * The closed episode that classifies a return for this child ID, or null
+     * when a return is a new admission with nothing to follow on from: no
+     * closed episode, a latest closed episode that classifies as nothing, or
+     * an episode still open.
+     *
+     * The latest closed episode decides, exactly as for readmittableEpisodeFor():
+     * this is the superset of it that also knows a relapse.
+     */
+    public static function classifyingEpisodeFor(mixed $idNumber): ?self
+    {
+        $previous = static::latestClosedEpisodeFor($idNumber);
+
+        if ($previous === null || $previous->classifiesReturnAs() === null) {
+            return null;
+        }
+
+        return static::hasOpenEpisodeFor($idNumber) ? null : $previous;
+    }
+
+    /**
+     * The classification a return for this child ID would carry right now,
+     * or null when it would be a new admission.
+     */
+    public static function readmissionClassificationFor(mixed $idNumber): ?string
+    {
+        return static::classifyingEpisodeFor($idNumber)?->classifiesReturnAs();
     }
 
     /**

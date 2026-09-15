@@ -402,6 +402,18 @@ class ReferralCenter extends Page implements HasTable
                 'outcome' => __('fields.' . $previous->discharge_outcome),
                 'date' => $previous->discharge_date?->format('Y-m-d') ?? '-',
             ]);
+
+            // The classification the system decided from the closed
+            // episode, and why. Said, not asked.
+            if (($classification = $previous->classifiesReturnAs()) !== null) {
+                $lines[] = __('ui.readmission.classification_line', [
+                    'classification' => FollowUpChildResource::readmissionClassificationLabel($classification),
+                ]);
+                $lines[] = __('ui.readmission.reason_line', [
+                    'reason' => __('ui.readmission.reasons.' . $classification),
+                ]);
+            }
+
             $lines[] = __('ui.readmission.visits_line', ['count' => $previous->visits()->count()]);
         }
 

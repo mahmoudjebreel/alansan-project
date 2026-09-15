@@ -495,15 +495,32 @@ class MealReportService
     /**
      * How an admission is reported: 'new', 'relapse' or 'readmission'.
      *
+     * The template has three admission columns and the module has three
+     * readmission classifications, mapped as follows:
+     *
+     *   readmission after defaulted   -> Readmission
+     *   readmission after other       -> Readmission
+     *   readmission after relapse     -> Relapse admission
+     *   everything else               -> New
+     *
      * Readmission is what the episode says it is: admission_type is written
-     * by the readmission workflow and nowhere else. Of the rest, the child's
-     * first episode on file is a new admission; an episode opened after an
-     * earlier one - the child came back after a closed episode whose outcome
-     * did not allow a readmission, typically a cure - is a relapse. This is
-     * the same reading the Children module's relapse rule makes when it
-     * raises the admission: a known child deteriorating is a relapse, and a
-     * new admission. Trashed episodes are not part of the history, exactly
-     * as everywhere else in the system.
+     * by the readmission workflow and nowhere else, and only after a default
+     * or an eligible other exit. A relapse is an episode linked, through
+     * previous_follow_up_child_id, to a SAM/MAM episode closed as cured -
+     * the link the transfer writes when it opens the episode. The linked
+     * episode is read even from the trash: the classification was settled
+     * when the episode was opened.
+     *
+     * An unlinked episode was written before the link existed, so its
+     * classification is read the way the module would have decided it: the
+     * latest closed non-trashed episode admitted before it, if that one is a
+     * SAM/MAM episode closed as cured, makes it a relapse. A latest closed
+     * episode with any other outcome - non-responded, died, cured with no
+     * SAM/MAM classification - makes it a new admission, as does having no
+     * earlier episode at all.
+     *
+     * Each episode is one row and the CASE yields one value, so no episode
+     * is ever counted under two admission columns.
      *
      * Written as one SQL expression so the admissions stay a single grouped
      * query, whatever the length of the period.
@@ -511,18 +528,37 @@ class MealReportService
     private function cmamAdmissionKindExpression(string $table): string
     {
         $readmission = FollowUpChild::ADMISSION_READMISSION;
+        $cured = FollowUpChild::CURED_OUTCOME;
+        $closing = implode(', ', array_map(
+            static fn (string $outcome): string => "'{$outcome}'",
+            FollowUpChild::CLOSING_OUTCOMES,
+        ));
 
         return "CASE
             WHEN {$table}.admission_type = '{$readmission}' THEN 'readmission'
-            WHEN EXISTS (
+            WHEN {$table}.previous_follow_up_child_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM {$table} AS previous
+                WHERE previous.id = {$table}.previous_follow_up_child_id
+                  AND previous.discharge_outcome = '{$cured}'
+                  AND previous.admitted_with IN ('SAM', 'MAM')
+            ) THEN 'relapse'
+            WHEN {$table}.previous_follow_up_child_id IS NULL AND EXISTS (
                 SELECT 1 FROM {$table} AS earlier
-                WHERE earlier.id_number = {$table}.id_number
-                  AND earlier.deleted_at IS NULL
-                  AND earlier.id <> {$table}.id
-                  AND (
-                      earlier.admission_date < {$table}.admission_date
-                      OR (earlier.admission_date = {$table}.admission_date AND earlier.id < {$table}.id)
-                  )
+                WHERE earlier.id = (
+                    SELECT latest.id FROM {$table} AS latest
+                    WHERE latest.id_number = {$table}.id_number
+                      AND latest.deleted_at IS NULL
+                      AND latest.id <> {$table}.id
+                      AND latest.discharge_outcome IN ({$closing})
+                      AND (
+                          latest.admission_date < {$table}.admission_date
+                          OR (latest.admission_date = {$table}.admission_date AND latest.id < {$table}.id)
+                      )
+                    ORDER BY latest.discharge_date DESC, latest.id DESC
+                    LIMIT 1
+                )
+                  AND earlier.discharge_outcome = '{$cured}'
+                  AND earlier.admitted_with IN ('SAM', 'MAM')
             ) THEN 'relapse'
             ELSE 'new'
         END";
