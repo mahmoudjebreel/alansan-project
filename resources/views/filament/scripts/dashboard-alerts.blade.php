@@ -127,6 +127,15 @@
         return document.documentElement.classList.contains("dark");
     };
 
+    // The blocking dialogs - a duplicate ID, a discharge to confirm - open
+    // in answer to something the user just did, so the entry and exit
+    // animations only put a beat between the action and the question.
+    // Spread into the Swal.fire() options of those dialogs and nothing else.
+    window.dashboardInstant = {
+        showClass: { popup: "swal2-noanimation", backdrop: "swal2-noanimation" },
+        hideClass: { popup: "", backdrop: "" },
+    };
+
     // Styled confirmation dialog. Returns the SweetAlert2 promise.
     window.dashboardConfirm = function (options) {
         options = options || {};
@@ -473,7 +482,8 @@
             cancelButtonColor: "#6b7280",
             reverseButtons: true,
             allowOutsideClick: false,
-            allowEscapeKey: false
+            allowEscapeKey: false,
+            ...window.dashboardInstant,
         }).then((result) => {
             if (result.isConfirmed) {
                 if (detail.action_type === "fill_child") {
@@ -509,7 +519,8 @@
             cancelButtonColor: "#6b7280",
             reverseButtons: true,
             allowOutsideClick: false,
-            allowEscapeKey: false
+            allowEscapeKey: false,
+            ...window.dashboardInstant,
         }).then((result) => {
             if (result.isConfirmed) {
                 Livewire.dispatch("fillGroupSessionDataFromAlert", { data: detail.record_data });
@@ -543,7 +554,8 @@
             cancelButtonColor: "#6b7280",
             reverseButtons: true,
             allowOutsideClick: false,
-            allowEscapeKey: false
+            allowEscapeKey: false,
+            ...window.dashboardInstant,
         }).then((result) => {
             if (result.isConfirmed) {
                 Livewire.dispatch("confirmFollowUpDischarge");
@@ -552,4 +564,170 @@
             }
         });
     });
+
+    // ---------------------------------------------------------------
+    // Unsaved changes: a panel dialog for links inside the application.
+    //
+    // Filament already guards a form with unsaved changes through the
+    // browser's own beforeunload dialog, and that stays exactly as it is:
+    // closing the tab, reloading, and leaving the site still get the
+    // browser's prompt, which is the only prompt those can have. What is
+    // added here is a dialog in the panel's own language for the one case
+    // the browser's dialog need not own - a click on a link inside the
+    // application while the form is dirty.
+    //
+    // "Dirty" is Filament's own definition and nothing else: the page
+    // component's form data, hashed the way Filament hashes it, against the
+    // hash Filament stored at load and refreshes after every save. So a
+    // pristine form asks nothing, a saved form asks nothing, and the two
+    // guards can never disagree about whether there is something to lose.
+    //
+    // A link that does not leave the page - an anchor, a wire:click, a
+    // modal trigger, a new tab - is not intercepted at all.
+    // ---------------------------------------------------------------
+    (function () {
+        const t = dashboardText.unsaved_changes;
+
+        if (! t) {
+            return;
+        }
+
+        /** Filament's own dirty test, as its unsaved-changes-alert.js writes it. */
+        function isDirty($wire) {
+            if (typeof window.jsMd5 !== "function" || $wire.savedDataHash === undefined) {
+                return false;
+            }
+
+            if ($wire?.__instance?.effects?.redirect) {
+                return false;
+            }
+
+            return window.jsMd5(JSON.stringify($wire.data).replace(/\\/g, "")) !== $wire.savedDataHash;
+        }
+
+        /** The page components carrying a Filament form with unsaved changes. */
+        function dirtyComponents() {
+            if (typeof Livewire === "undefined" || typeof Livewire.all !== "function") {
+                return [];
+            }
+
+            return Livewire.all().filter((component) => {
+                try {
+                    return isDirty(component.$wire);
+                } catch (error) {
+                    return false;
+                }
+            });
+        }
+
+        /** Whether following this link leaves the page, in this tab. */
+        function leavesPage(link, event) {
+            if (event.defaultPrevented || event.button !== 0) {
+                return false;
+            }
+
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return false;
+            }
+
+            const href = link.getAttribute("href");
+
+            if (! href || href.startsWith("#") || href.startsWith("javascript:")) {
+                return false;
+            }
+
+            if (link.hasAttribute("download") || link.hasAttribute("data-no-unsaved-guard")) {
+                return false;
+            }
+
+            const target = (link.getAttribute("target") || "").toLowerCase();
+
+            if (target && target !== "_self") {
+                return false;
+            }
+
+            // Filament and Alpine handle these themselves; they open a
+            // modal or call the component rather than navigating.
+            for (const attribute of link.attributes) {
+                const name = attribute.name;
+
+                if (name.startsWith("wire:click") || name.startsWith("x-on:click") || name.startsWith("@click")) {
+                    return false;
+                }
+            }
+
+            let url;
+
+            try {
+                url = new URL(link.href, window.location.href);
+            } catch (error) {
+                return false;
+            }
+
+            if (url.origin !== window.location.origin) {
+                return false;
+            }
+
+            // The same page, another fragment.
+            if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash) {
+                return false;
+            }
+
+            return true;
+        }
+
+        // Capture phase, before anything else sees the click, and delegated
+        // from the document so it survives every re-render.
+        document.addEventListener("click", (event) => {
+            const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+
+            if (! link || ! leavesPage(link, event)) {
+                return;
+            }
+
+            const dirty = dirtyComponents();
+
+            if (dirty.length === 0) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            Swal.fire({
+                title: t.title,
+                html: window.dashboardDialogBody(`<p style="color: #374151;">${t.text}</p>`),
+                icon: "warning",
+                showCancelButton: true,
+                confirmButtonText: t.leave,
+                cancelButtonText: t.stay,
+                confirmButtonColor: "#dc2626",
+                cancelButtonColor: "#6b7280",
+                reverseButtons: true,
+                focusCancel: true,
+                allowOutsideClick: false,
+                background: window.dashboardIsDark() ? "#1f2937" : "#ffffff",
+                color: window.dashboardIsDark() ? "#f9fafb" : "#111827",
+                ...window.dashboardInstant,
+            }).then((result) => {
+                if (! result.isConfirmed) {
+                    return;
+                }
+
+                // The user has answered the question once. Filament's
+                // beforeunload listener stands down for a Livewire redirect
+                // in flight, and that is what this departure now is; without
+                // it the browser would ask the same question a second time.
+                for (const component of dirty) {
+                    const instance = component.$wire?.__instance;
+
+                    if (instance && instance.effects) {
+                        instance.effects.redirect = link.href;
+                    }
+                }
+
+                window.location.assign(link.href);
+            });
+        }, true);
+    })();
 </script>

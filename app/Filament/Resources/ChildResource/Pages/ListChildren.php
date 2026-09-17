@@ -62,8 +62,9 @@ class ListChildren extends ListRecords
 
         AuditEvents::pdfExport('Child');
 
-        return PdfExport::download(
+        return PdfExport::start(
             new ChildrenExport($this->exportQuery()),
+            'children.export',
             'children.pdf',
             __('fields.children'),
             'name',

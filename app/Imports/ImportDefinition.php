@@ -907,8 +907,12 @@ final class ImportDefinition
                 resource: \App\Filament\Resources\FollowUpChildResource::class,
                 permission: 'follow_up_children.import',
                 filename: 'follow-up-children',
-                // Age at admission is derived from DOB + admission date.
-                computed: ['age_at_admission'],
+                // Age at admission is derived from DOB + admission date. The
+                // readmission history and the age at the last visit are
+                // export-only readings of other rows; none of them is a
+                // column, and a value under any of these headings in an
+                // uploaded file is dropped rather than written.
+                computed: ['age_at_admission', ...FollowUpChildrenExport::COMPUTED_FIELDS],
                 synonyms: [
                     'sex' => [
                         'ذكر' => 'M',

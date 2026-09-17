@@ -207,12 +207,21 @@ class PregnantLactatingWomanResource extends Resource
             ? $livewire->record
             : null;
 
+        static::syncVisitType($get, $set, $livewire);
+
+        // Editing is not a new registration. The visit type was re-derived
+        // above exactly as before; the alert below - "already registered",
+        // with an offer to prefill from the previous visit - is about
+        // registering a mother a second time, and on the edit form it is
+        // only ever a wrong answer.
+        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+            return;
+        }
+
         // Soft-deleted records live in the trash and are not part of the system
         // any more, so the default (non-trashed) scope is what decides both the
         // duplicate alert and the visit type.
         $existing = PregnantWomanDuplicateChecker::latestActiveVisit($motherId, $ignoreRecord);
-
-        static::syncVisitType($get, $set, $livewire);
 
         // A first visit is simply "new" - no alert, nothing to confirm.
         if (! $existing) {

@@ -62,8 +62,9 @@ class ListPregnantLactatingWomen extends ListRecords
 
         AuditEvents::pdfExport('PregnantLactatingWoman');
 
-        return PdfExport::download(
+        return PdfExport::start(
             new PregnantWomenExport($this->exportQuery()),
+            'pregnant.export',
             'pregnant-lactating-women.pdf',
             __('fields.pregnant_lactating_women'),
             'full_name_ar',

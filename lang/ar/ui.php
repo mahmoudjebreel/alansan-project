@@ -335,6 +335,16 @@ return [
             'confirm' => 'تخريج كحالة شفاء',
             'keep' => 'إبقاؤه تحت المتابعة',
         ],
+
+        // Shown in place of the browser's own dialog when an internal link
+        // is followed while a form holds unsaved changes. Closing or
+        // reloading the tab still gets the browser's native dialog.
+        'unsaved_changes' => [
+            'title' => 'لديك تغييرات غير محفوظة',
+            'text' => 'لديك بيانات تم تعديلها ولم يتم حفظها. هل تريد مغادرة الصفحة؟',
+            'leave' => 'مغادرة الصفحة',
+            'stay' => 'البقاء في الصفحة',
+        ],
     ],
 
     // -----------------------------------------------------------------

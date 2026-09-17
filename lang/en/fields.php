@@ -277,9 +277,16 @@ return [
     'follow_up_child_data' => 'Follow Up Child Data',
     'dob' => 'DOB',
     'age_at_admission' => 'Age at Admission',
+    // Export-only: the child's age on the date of the latest recorded visit,
+    // by the same formatter as the age at admission. Never imported.
+    'age_at_last_visit' => 'Age at Last Visit',
     'age' => 'Age',
     'causes_of_admission' => 'Causes of Admission',
     'admitted_with' => 'Admitted with',
+    // The stored SAM/MAM values, translated to themselves so an enum column
+    // exports the acronym rather than the untranslated key.
+    'SAM' => 'SAM',
+    'MAM' => 'MAM',
     'admission_date' => 'Admission Date',
     'discharge_date' => 'Discharge Date',
     'discharge_outcome' => 'Discharge Outcome',
@@ -300,6 +307,14 @@ return [
     'readmission_after_defaulted' => 'Readmission after Defaulted',
     'readmission_after_other' => 'Readmission after Other',
     'readmission_after_relapse' => 'Readmission after Relapse',
+    // The listing column that names the episode as one of the five cases:
+    // the three readmission classifications above, a defaulted episode, or
+    // a plain new admission. Derived, never picked by hand.
+    'case_classification' => 'Case classification',
+    // Export-only: the closed episode a readmission follows on from.
+    'previous_episode_admission_date' => 'Previous Episode Admission Date',
+    'previous_episode_discharge_date' => 'Previous Episode Discharge Date',
+    'previous_episode_outcome' => 'Previous Episode Outcome',
     'visit_status' => 'Visit status',
     'visit_attended' => 'Attended',
     'visit_missed' => 'Missed',

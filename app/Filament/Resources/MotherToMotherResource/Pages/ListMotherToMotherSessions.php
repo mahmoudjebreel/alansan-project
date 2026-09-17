@@ -49,7 +49,7 @@ class ListMotherToMotherSessions extends ListRecords
     {
         abort_unless(auth()->user()?->can('mother_to_mother.export') ?? false, 403);
         AuditEvents::pdfExport('MotherToMotherSession');
-        return PdfExport::download(new MotherToMotherExport($this->exportQuery()), 'mother-to-mother-sessions.pdf', __('fields.mother_to_mother_sessions'), 'full_name_ar');
+        return PdfExport::start(new MotherToMotherExport($this->exportQuery()), 'mother_to_mother.export', 'mother-to-mother-sessions.pdf', __('fields.mother_to_mother_sessions'), 'full_name_ar');
     }
 
     private function exportQuery()

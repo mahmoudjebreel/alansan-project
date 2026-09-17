@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ActivityHeartbeatController;
 use App\Http\Controllers\ActivityPageLeaveController;
+use App\Http\Controllers\PdfExportDownloadController;
 use App\Http\Controllers\SessionKeepAliveController;
 use App\Http\Controllers\SwitchLocaleController;
 use Illuminate\Support\Facades\Route;
@@ -35,3 +36,11 @@ Route::post('/activity/heartbeat', ActivityHeartbeatController::class)
 
 Route::post('/activity/leave', ActivityPageLeaveController::class)
     ->name('activity.leave');
+
+// A module's PDF report, collected as an ordinary download rather than
+// returned through Livewire. Deliberately not behind `auth` for the reason
+// the keep-alive gives: it answers an unknown or foreign ticket with a 404
+// and a user who may no longer export with a 403, itself.
+Route::get('/exports/pdf/{ticket}', PdfExportDownloadController::class)
+    ->whereAlphaNumeric('ticket')
+    ->name('exports.pdf');

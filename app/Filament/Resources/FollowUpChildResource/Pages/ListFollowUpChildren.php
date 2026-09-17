@@ -16,7 +16,6 @@ use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Database\Eloquent\Builder;
-use Maatwebsite\Excel\Facades\Excel;
 
 class ListFollowUpChildren extends ListRecords
 {
@@ -98,6 +97,21 @@ class ListFollowUpChildren extends ListRecords
         return 'follow_up_children';
     }
 
+    /**
+     * The whole follow-up history as one streamed CSV.
+     *
+     * Every episode on file - open, closed under any outcome, historical,
+     * and each readmission as its own row - whatever tab the listing is
+     * showing. The export used to read the table's own query, so with the
+     * Active tab open it wrote the fifty-odd open cases and nothing else.
+     *
+     * Streamed rather than built as a workbook: the history runs to
+     * something like 150,000 rows, and PhpSpreadsheet holds the whole sheet
+     * in memory before it writes a byte. The CSV is written a chunk at a
+     * time and opens in Excel, Arabic included.
+     *
+     * @see \App\Exports\FollowUpChildrenExport::writeCsv()
+     */
     public function downloadExcel()
     {
         abort_unless(auth()->user()?->can('follow_up_children.export') ?? false, 403);
@@ -105,7 +119,8 @@ class ListFollowUpChildren extends ListRecords
         // Announce the export after the fact; it cannot affect the download.
         ExcelActionOccurred::dispatch('FollowUpChild', ActionType::EXPORT, auth()->user());
 
-        return Excel::download(new FollowUpChildrenExport($this->exportQuery()), 'follow-up-children.xlsx');
+        return (new FollowUpChildrenExport($this->allHistoryExportQuery()))
+            ->toCsvResponse('follow-up-children.csv');
     }
 
     public function downloadPdf()
@@ -116,11 +131,30 @@ class ListFollowUpChildren extends ListRecords
 
         // This module keeps repeated visits: they print as numbered rows
         // under the record, not as thirty-two extra columns.
-        return FollowUpChildPdfExport::download(
+        return FollowUpChildPdfExport::start(
             $this->exportQuery(),
             'follow-up-children.pdf',
             __('fields.follow_up_children'),
         );
+    }
+
+    /**
+     * The query behind the CSV export: the resource's own records with the
+     * filters and search the user set, and nothing from the active tab.
+     *
+     * Built from the resource query rather than the table's, because the
+     * table's query carries the tab's restriction with it. The filters and
+     * the search are applied the way the table itself applies them; the
+     * sort is left off, as the writer orders by primary key.
+     */
+    public function allHistoryExportQuery(): Builder
+    {
+        $query = static::getResource()::getEloquentQuery();
+
+        $this->applyFiltersToTableQuery($query);
+        $this->applySearchToTableQuery($query);
+
+        return $query->select($query->getModel()->qualifyColumn('*'));
     }
 
     private function exportQuery()

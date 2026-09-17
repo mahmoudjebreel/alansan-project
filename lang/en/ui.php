@@ -330,6 +330,16 @@ return [
             'confirm' => 'Discharge as cured',
             'keep' => 'Keep under follow-up',
         ],
+
+        // Shown in place of the browser's own dialog when an internal link
+        // is followed while a form holds unsaved changes. Closing or
+        // reloading the tab still gets the browser's native dialog.
+        'unsaved_changes' => [
+            'title' => 'You have unsaved changes',
+            'text' => 'Some of the data on this page was changed and has not been saved. Leave the page?',
+            'leave' => 'Leave the page',
+            'stay' => 'Stay on the page',
+        ],
     ],
 
     // -----------------------------------------------------------------

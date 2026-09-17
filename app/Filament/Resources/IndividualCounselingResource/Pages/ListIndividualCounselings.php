@@ -51,7 +51,7 @@ class ListIndividualCounselings extends ListRecords
         AuditEvents::pdfExport('IndividualCounseling');
         // This module has its own PDF builder: six session groups would be
         // eighteen unreadable extra columns in the shared flat-table report.
-        return IndividualCounselingPdfExport::download(
+        return IndividualCounselingPdfExport::start(
             $this->exportQuery(),
             'individual-counselings.pdf',
             __('fields.individual_counselings'),

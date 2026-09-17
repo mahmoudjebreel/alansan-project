@@ -16,6 +16,33 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class IndividualCounselingPdfExport
 {
+    /**
+     * Park the report and send the browser to collect it.
+     *
+     * This is what the module's button returns; the report itself is built by
+     * the download route, which can stream for as long as it needs to.
+     *
+     * @return \Illuminate\Http\RedirectResponse|\Illuminate\Routing\Redirector
+     *
+     * @see \App\Exports\PdfExport::start()  why the type is left open
+     */
+    public static function start(Builder $query, string $filename, string $title)
+    {
+        return PdfExport::start(
+            new IndividualCounselingExport($query),
+            'individual_counseling.export',
+            $filename,
+            $title,
+            'child_name',
+            self::class,
+        );
+    }
+
+    /**
+     * The report as a download, built as it is sent. The route uses the
+     * shared builder directly; this stays for tests that want the whole
+     * report from one call.
+     */
     public static function download(
         Builder $query,
         string $filename,

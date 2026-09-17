@@ -279,9 +279,16 @@ return [
     'follow_up_child_data' => 'بيانات متابعة الطفل',
     'dob' => 'تاريخ الميلاد',
     'age_at_admission' => 'العمر عند القبول',
+    // Export-only: the child's age on the date of the latest recorded visit,
+    // by the same formatter as the age at admission. Never imported.
+    'age_at_last_visit' => 'العمر عند آخر زيارة',
     'age' => 'العمر',
     'causes_of_admission' => 'أسباب القبول',
     'admitted_with' => 'حالة القبول',
+    // The stored SAM/MAM values, translated to themselves so an enum column
+    // exports the acronym rather than the untranslated key.
+    'SAM' => 'SAM',
+    'MAM' => 'MAM',
     'admission_date' => 'تاريخ القبول',
     'discharge_date' => 'تاريخ التخريج',
     'discharge_outcome' => 'نتيجة التخريج',
@@ -302,6 +309,14 @@ return [
     'readmission_after_defaulted' => 'إعادة قبول بعد انقطاع',
     'readmission_after_other' => 'إعادة قبول بعد تخريج آخر',
     'readmission_after_relapse' => 'إعادة قبول بعد انتكاسة',
+    // The listing column that names the episode as one of the five cases:
+    // the three readmission classifications above, a defaulted episode, or
+    // a plain new admission. Derived, never picked by hand.
+    'case_classification' => 'تصنيف الحالة',
+    // Export-only: the closed episode a readmission follows on from.
+    'previous_episode_admission_date' => 'تاريخ قبول الملف السابق',
+    'previous_episode_discharge_date' => 'تاريخ تخريج الملف السابق',
+    'previous_episode_outcome' => 'نتيجة الملف السابق',
     'visit_status' => 'حالة الزيارة',
     'visit_attended' => 'حضر',
     'visit_missed' => 'لم يحضر',

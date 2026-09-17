@@ -131,6 +131,16 @@ class AdminPanelProvider extends PanelProvider
                 ])->render()
             )
             ->renderHook(
+                // The dialogs' library is loaded at the end of the body; the
+                // hint lets the browser fetch it alongside the page instead
+                // of after it, so the first alert has nothing left to wait
+                // for. A hint only: nothing runs any earlier or differently.
+                PanelsRenderHook::HEAD_END,
+                fn (): string => '<link rel="preload" href="'
+                    . e(asset('vendor/sweetalert2/sweetalert2.all.min.js'))
+                    . '" as="script">'
+            )
+            ->renderHook(
                 PanelsRenderHook::BODY_END,
                 fn (): string => view('filament.scripts.dashboard-alerts', [
                     'primaryColor' => self::primaryColor(),

@@ -97,6 +97,135 @@ class FollowUpChildResource extends Resource
     }
 
     /**
+     * The two cases the listing names on top of the three readmission
+     * classifications. Not a fourth and fifth classification: only an
+     * episode the module classifies as nothing can carry either.
+     *
+     * The keys are deliberately not any of READMISSION_CLASSIFICATIONS -
+     * 'defaulted' there means "readmission after a default", which is a
+     * different statement about a different episode.
+     */
+    public const CASE_DEFAULTED = 'defaulted_case';
+
+    public const CASE_NEW = 'new';
+
+    /**
+     * The five values the case classification column can show.
+     *
+     * @return array<string, string>
+     */
+    public static function caseClassificationOptions(): array
+    {
+        return static::readmissionClassificationOptions() + [
+            self::CASE_DEFAULTED => __('fields.defaulted'),
+            self::CASE_NEW => __('fields.admission_new'),
+        ];
+    }
+
+    /**
+     * How one episode is classified in the listing.
+     *
+     * The readmission part is not decided here: it is read straight off
+     * FollowUpChild::readmissionClassification(), the same method the
+     * spreadsheet's readmission_classification column is written from, so
+     * the listing and the export can never disagree about an episode. No
+     * second algorithm is introduced and no time-based rule is invented.
+     *
+     * @see \App\Models\FollowUpChild::readmissionClassification()
+     * @see \App\Exports\FollowUpChildrenExport::formatValue()
+     *
+     * Order matters, and follows the module's own: what an episode follows
+     * on from is what the episode is, so a readmission stays a readmission
+     * however it later ended - its own ending is already the discharge
+     * outcome column. Only an episode that follows on from nothing is named
+     * by its own outcome, and only when that outcome is a default.
+     */
+    public static function caseClassification(FollowUpChild $record): string
+    {
+        $classification = $record->readmissionClassification();
+
+        if ($classification !== null) {
+            return $classification;
+        }
+
+        return $record->discharge_outcome === FollowUpChild::DEFAULTED_OUTCOME
+            ? self::CASE_DEFAULTED
+            : self::CASE_NEW;
+    }
+
+    public static function caseClassificationLabel(FollowUpChild $record): string
+    {
+        return static::caseClassificationOptions()[static::caseClassification($record)];
+    }
+
+    /**
+     * The filter behind the column: the same five cases, as a query.
+     *
+     * The column itself calls the model method one record at a time, which
+     * a WHERE clause cannot do, so the previous episode's side of
+     * classifiesReturnAs() is expressed here as a constraint on the linked
+     * record. Both sides read the same three facts about that record - its
+     * discharge outcome, and for a cure its admission classification - so
+     * the filter selects exactly the rows the column names.
+     *
+     * The linked episode is matched from the trash as well, because
+     * readmissionClassification() reads it from the trash: the
+     * classification was settled when the episode was opened.
+     *
+     * @see \App\Models\FollowUpChild::classifiesReturnAs()
+     */
+    public static function applyCaseClassificationFilter(Builder $query, ?string $value): Builder
+    {
+        if ($value === null || $value === '') {
+            return $query;
+        }
+
+        if (array_key_exists($value, static::readmissionClassificationOptions())) {
+            return $query->whereHas(
+                'previousEpisode',
+                fn (Builder $previous): Builder => static::previousEpisodeClassifying($previous->withTrashed(), $value),
+            );
+        }
+
+        // Neither case follows on from anything the module classifies.
+        $query->whereDoesntHave('previousEpisode', function (Builder $previous): void {
+            $previous->withTrashed()->where(function (Builder $any): void {
+                foreach (FollowUpChild::READMISSION_CLASSIFICATIONS as $classification) {
+                    $any->orWhere(fn (Builder $one): Builder => static::previousEpisodeClassifying($one, $classification));
+                }
+            });
+        });
+
+        return $value === self::CASE_DEFAULTED
+            ? $query->where('discharge_outcome', FollowUpChild::DEFAULTED_OUTCOME)
+            : $query->where(function (Builder $query): void {
+                $query->whereNull('discharge_outcome')
+                    ->orWhere('discharge_outcome', '!=', FollowUpChild::DEFAULTED_OUTCOME);
+            });
+    }
+
+    /**
+     * What the previous episode must look like for a return after it to
+     * carry the given classification - the query side of
+     * FollowUpChild::classifiesReturnAs(), and nothing more.
+     *
+     * Every outcome named here is one of CLOSING_OUTCOMES, so the "must be
+     * closed" half of that method is already implied by matching on it.
+     */
+    private static function previousEpisodeClassifying(Builder $previous, string $classification): Builder
+    {
+        return match ($classification) {
+            FollowUpChild::READMISSION_AFTER_DEFAULTED => $previous
+                ->where('discharge_outcome', FollowUpChild::DEFAULTED_OUTCOME),
+            FollowUpChild::READMISSION_AFTER_OTHER => $previous
+                ->whereIn('discharge_outcome', FollowUpChild::OTHER_READMISSION_OUTCOMES),
+            FollowUpChild::READMISSION_AFTER_RELAPSE => $previous
+                ->where('discharge_outcome', FollowUpChild::CURED_OUTCOME)
+                ->whereIn('admitted_with', [MuacClassifier::SAM, MuacClassifier::MAM]),
+        };
+    }
+
+    /**
      * @return array<string, string>
      */
     public static function visitStatusOptions(): array
@@ -544,6 +673,25 @@ class FollowUpChildResource extends Resource
                     ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->admissionType()])
                     ->badge()
                     ->color(fn (FollowUpChild $record): string => $record->isReadmission() ? 'warning' : 'info'),
+                // What kind of case the episode is, derived from the closed
+                // episode it follows on from exactly as the spreadsheet's
+                // readmission_classification column is.
+                // @see static::caseClassification()
+                Tables\Columns\TextColumn::make('case_classification')
+                    ->label(__('fields.case_classification'))
+                    ->state(fn (FollowUpChild $record): string => static::caseClassificationLabel($record))
+                    ->badge()
+                    ->color(fn (FollowUpChild $record): string => match (static::caseClassification($record)) {
+                        FollowUpChild::READMISSION_AFTER_RELAPSE => 'danger',
+                        FollowUpChild::READMISSION_AFTER_DEFAULTED => 'warning',
+                        FollowUpChild::READMISSION_AFTER_OTHER => 'gray',
+                        self::CASE_DEFAULTED => 'warning',
+                        default => 'info',
+                    })
+                    // Derived per record rather than stored, so the table
+                    // cannot sort or search on it; the filter below is how
+                    // the listing is narrowed to one kind of case.
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('latest_visit_number')
                     ->label(__('fields.latest_visit_number'))
                     // Read off the eager-loaded relation, so the column costs
@@ -621,6 +769,15 @@ class FollowUpChildResource extends Resource
                         FollowUpChild::ADMISSION_READMISSION => $query->where('admission_type', FollowUpChild::ADMISSION_READMISSION),
                         default => $query,
                     }),
+                // The column's five cases, as a filter.
+                // @see static::applyCaseClassificationFilter()
+                Tables\Filters\SelectFilter::make('case_classification')
+                    ->label(__('fields.case_classification'))
+                    ->options(static::caseClassificationOptions())
+                    ->query(fn (Builder $query, array $data): Builder => static::applyCaseClassificationFilter(
+                        $query,
+                        $data['value'] ?? null,
+                    )),
                 Tables\Filters\SelectFilter::make('shelter_name')
                     ->label(__('fields.shelter_name'))
                     ->options(fn (): array => FollowUpChild::query()

@@ -197,11 +197,6 @@ class ChildResource extends Resource
             ? $livewire->record
             : null;
 
-        // Soft-deleted children live in the trash and are not part of the system
-        // any more, so the default (non-trashed) scope is what decides both the
-        // duplicate alert and the visit type.
-        $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
-
         // The follow-up module's own knowledge of the child, whatever became
         // of the episode. A closed episode is a finished treatment, not a
         // forgotten child: it still says who the child is, and the referral
@@ -209,6 +204,22 @@ class ChildResource extends Resource
         $episode = ChildDuplicateChecker::latestFollowUpEpisode($childId);
 
         static::announceFollowUpHistory($livewire, $childId, $episode);
+
+        // Editing is not a new registration. The record on the form is the
+        // child's own row, and the alert below - "already registered", with
+        // an offer to prefill from the previous visit - is about registering
+        // a child a second time; on the edit form it is only ever a wrong
+        // answer. The follow-up history was still announced above, so the
+        // SAM/MAM referral prompt on this form knows exactly what it always
+        // knew; nothing else on the edit form read what follows.
+        if ($livewire instanceof \Filament\Resources\Pages\EditRecord) {
+            return;
+        }
+
+        // Soft-deleted children live in the trash and are not part of the system
+        // any more, so the default (non-trashed) scope is what decides both the
+        // duplicate alert and the visit type.
+        $existing = ChildDuplicateChecker::latestActiveVisit($childId, $ignoreRecord);
 
         // Settled from the rows already in hand rather than by looking the
         // same child up a second time.
