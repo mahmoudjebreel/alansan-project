@@ -155,12 +155,16 @@ class PdfExportChunkingTest extends TestCase
     // -----------------------------------------------------------------
 
     /**
-     * The default is five hundred records per part, which is what every
-     * module's download splits at.
+     * The default is a hundred records per part, which is what every module's
+     * download splits at.
+     *
+     * The size is a first-byte budget, not a throughput one: nothing reaches
+     * the browser until the first part is closed, and a proxy in front of the
+     * site ends a request it has had no bytes from for a hundred seconds.
      */
-    public function test_the_chunk_size_is_five_hundred(): void
+    public function test_the_chunk_size_is_one_hundred(): void
     {
-        $this->assertSame(500, PdfExport::CHUNK);
+        $this->assertSame(100, PdfExport::CHUNK);
     }
 
     /**

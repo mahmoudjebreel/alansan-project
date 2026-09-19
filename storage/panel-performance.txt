@@ -4,48 +4,48 @@ PANEL PERFORMANCE — queries and wall time (in-memory SQLite)
 ==========================================================================
 SCREEN / ACTION                        ROWS    QUERIES       TIME
 --------------------------------------------------------------------------
-Dashboard                                40          7       108ms
-Children (list)                          40          5       191ms
-Children (create)                        40          3        87ms
-Pregnant women                           40          5       144ms
-Group sessions                           40          5       125ms
-Mother to mother                         40          5       126ms
-Individual counseling                    40          5       128ms
-Follow up children                       40         11       144ms
-Users                                    40          6       314ms
-Roles                                    40          5        90ms
-Trash                                    40          6        66ms
-Backups                                  40          3      3962ms
-Cache management                         40          3      2870ms
-Activity log                             40          6       452ms
-Notification log                         40          5        69ms
-Notification settings                    40          5        64ms
-General settings                         40          3       631ms
-MEAL report                              40          3        65ms
-Dashboard @4x                           160          3        69ms
-Children (list) @4x                     160          5       141ms
-Children (create) @4x                   160          3        84ms
-Pregnant women @4x                      160          5       135ms
-Group sessions @4x                      160          5       125ms
-Mother to mother @4x                    160          5       130ms
-Individual counseling @4x               160          5       125ms
-Follow up children @4x                  160         11       134ms
-Users @4x                               160          6        81ms
-Roles @4x                               160          5        90ms
-Trash @4x                               160          6        65ms
-Backups @4x                             160          3        68ms
-Cache management @4x                    160          3        69ms
-Activity log @4x                        160          6        80ms
-Notification log @4x                    160          5        73ms
-Notification settings @4x               160          5        63ms
-General settings @4x                    160          3        66ms
-MEAL report @4x                         160          3        67ms
-Trash: restore                           40          7        12ms
-Trash: delete for good                   40          6        11ms
+Dashboard                                40          7       373ms
+Children (list)                          40          5       554ms
+Children (create)                        40          3       493ms
+Pregnant women                           40          5       691ms
+Group sessions                           40          5       745ms
+Mother to mother                         40          5      1095ms
+Individual counseling                    40          5      1087ms
+Follow up children                       40         11       163ms
+Users                                    40          6       188ms
+Roles                                    40          5        85ms
+Trash                                    40          6      2757ms
+Backups                                  40          3      2401ms
+Cache management                         40          3      2721ms
+Activity log                             40          6       576ms
+Notification log                         40          5       456ms
+Notification settings                    40          5      1107ms
+General settings                         40          3       722ms
+MEAL report                              40          3      2955ms
+Dashboard @4x                           160          3       117ms
+Children (list) @4x                     160          5       272ms
+Children (create) @4x                   160          3       775ms
+Pregnant women @4x                      160          5       435ms
+Group sessions @4x                      160          5       493ms
+Mother to mother @4x                    160          5       434ms
+Individual counseling @4x               160          5       330ms
+Follow up children @4x                  160         11       722ms
+Users @4x                               160          6       244ms
+Roles @4x                               160          5       233ms
+Trash @4x                               160          6       197ms
+Backups @4x                             160          3       285ms
+Cache management @4x                    160          3       213ms
+Activity log @4x                        160          6       391ms
+Notification log @4x                    160          5       234ms
+Notification settings @4x               160          5       254ms
+General settings @4x                    160          3       134ms
+MEAL report @4x                         160          3       250ms
+Trash: restore                           40          9        94ms
+Trash: delete for good                   40          6        52ms
 Trash (120 deleted)                     120         12         0ms
-Trash (10 deleted)                       10         13       121ms
-Trash (40 deleted)                       40          9       127ms
-Duplicate alert raised                   40          2        15ms
-Duplicate alert: fetch data              40          1        26ms
-MUAC entered                             40          0        15ms
+Trash (10 deleted)                       10         13       429ms
+Trash (40 deleted)                       40          9       378ms
+Duplicate alert raised                   40          2        33ms
+Duplicate alert: fetch data              40          1        58ms
+MUAC entered                             40          0        64ms
 ==========================================================================

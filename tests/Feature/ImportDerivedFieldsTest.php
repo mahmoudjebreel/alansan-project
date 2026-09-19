@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Imports\ImportDefinition;
 use App\Models\Child;
 use App\Models\GroupSession;
+use App\Models\MotherToMotherSession;
 use App\Models\PregnantLactatingWoman;
 use App\Models\User;
 use App\Services\ExcelImportService;
@@ -329,6 +330,124 @@ class ImportDerivedFieldsTest extends TestCase
         $this->assertSame([], $result['errors']);
 
         $imported = GroupSession::where('session_group_number', 'G2')->firstOrFail();
+
+        $this->assertSame('new', $imported->visit_type);
+    }
+
+    /**
+     * The rule has to hold inside one file too. The module's deriver runs while
+     * the file is being read, before a single row is written, so a participant
+     * appearing three times in the same upload was compared against a table
+     * that did not yet hold her earlier rows and came out "new" every time.
+     */
+    public function test_a_participant_repeated_inside_one_file_is_new_only_the_first_time(): void
+    {
+        $row = function (string $group, string $date, string $claimed): array {
+            return [
+                __('fields.session_date') => $date,
+                __('fields.session_group_number') => $group,
+                __('fields.session_subject') => __('fields.bf_support'),
+                __('fields.locality') => __('fields.karamah'),
+                __('fields.shelter_name') => __('fields.el_salam'),
+                __('fields.id_number') => '888888888',
+                __('fields.full_name_ar') => 'مشاركة',
+                __('fields.visit_type') => $claimed,
+                __('fields.category') => __('fields.pregnant'),
+                __('fields.marital_status') => __('fields.married'),
+            ];
+        };
+
+        // Every row claims "new"; only the first attendance actually is one.
+        $result = $this->import('group_sessions', $this->sheet(
+            'group_sessions',
+            $row('G1', '2026-01-01', __('fields.new')),
+            $row('G2', '2026-02-01', __('fields.new')),
+            $row('G3', '2026-03-01', __('fields.new')),
+        ));
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(3, GroupSession::where('id_number', '888888888')->count());
+
+        $this->assertSame('new', GroupSession::where('session_group_number', 'G1')->firstOrFail()->visit_type);
+        $this->assertSame('follow_up', GroupSession::where('session_group_number', 'G2')->firstOrFail()->visit_type);
+        $this->assertSame('follow_up', GroupSession::where('session_group_number', 'G3')->firstOrFail()->visit_type);
+    }
+
+    // -----------------------------------------------------------------
+    // Mother to mother
+    // -----------------------------------------------------------------
+
+    /**
+     * The twin module counts attendance the same way, inside one file as well.
+     */
+    public function test_a_mother_to_mother_participant_is_new_only_on_her_first_session(): void
+    {
+        $row = function (string $group, string $date, string $claimed): array {
+            return [
+                __('fields.session_date') => $date,
+                __('fields.session_group_number') => $group,
+                __('fields.session_subject') => __('fields.bf_support'),
+                __('fields.locality') => __('fields.mosaab_camp'),
+                __('fields.shelter_name') => 'Mosaab Camp',
+                __('fields.id_number') => '999999999',
+                __('fields.full_name_ar') => 'مشاركة',
+                __('fields.visit_type') => $claimed,
+                __('fields.category') => __('fields.pregnant'),
+                __('fields.marital_status') => __('fields.married'),
+            ];
+        };
+
+        // Every row claims "new"; only her first attendance actually is one.
+        $result = $this->import('mother_to_mother', $this->sheet(
+            'mother_to_mother',
+            $row('G1', '2026-01-01', __('fields.new')),
+            $row('G2', '2026-02-01', __('fields.new')),
+        ));
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(2, MotherToMotherSession::where('id_number', '999999999')->count());
+
+        $this->assertSame('new', MotherToMotherSession::where('session_group_number', 'G1')->firstOrFail()->visit_type);
+        $this->assertSame('follow_up', MotherToMotherSession::where('session_group_number', 'G2')->firstOrFail()->visit_type);
+    }
+
+    /**
+     * And a session that is only in the trash never makes the next one a
+     * follow up - the rule both twins are built on.
+     */
+    public function test_a_trashed_mother_to_mother_session_does_not_make_an_import_a_follow_up(): void
+    {
+        $previous = MotherToMotherSession::create([
+            'session_date' => '2026-01-01',
+            'session_group_number' => 'G1',
+            'session_subject' => 'bf_support',
+            'locality' => 'mosaab_camp',
+            'shelter_name' => 'Mosaab Camp',
+            'id_number' => '121212121',
+            'full_name_ar' => 'مشاركة',
+            'visit_type' => 'new',
+            'category' => 'pregnant',
+            'marital_status' => 'married',
+        ]);
+
+        $previous->delete();
+
+        $result = $this->import('mother_to_mother', $this->sheet('mother_to_mother', [
+            __('fields.session_date') => '2026-02-01',
+            __('fields.session_group_number') => 'G2',
+            __('fields.session_subject') => __('fields.bf_support'),
+            __('fields.locality') => __('fields.mosaab_camp'),
+            __('fields.shelter_name') => 'Mosaab Camp',
+            __('fields.id_number') => '121212121',
+            __('fields.full_name_ar') => 'مشاركة',
+            __('fields.visit_type') => __('fields.follow_up'),
+            __('fields.category') => __('fields.pregnant'),
+            __('fields.marital_status') => __('fields.married'),
+        ]));
+
+        $this->assertSame([], $result['errors']);
+
+        $imported = MotherToMotherSession::where('session_group_number', 'G2')->firstOrFail();
 
         $this->assertSame('new', $imported->visit_type);
     }

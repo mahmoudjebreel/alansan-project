@@ -9,6 +9,7 @@ use App\Filament\Resources\MotherToMotherResource\Pages;
 use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\MotherToMotherSession;
 use App\Support\FilamentInfolist;
+use App\Support\MotherToMotherDuplicateChecker;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -87,8 +88,30 @@ class MotherToMotherResource extends Resource
                     ->maxLength(255),
                 Forms\Components\Select::make('locality')->label(__('fields.locality'))->options(static::localityOptions())->required(),
                 Forms\Components\TextInput::make('shelter_name')->label(__('fields.shelter_name'))->required()->maxLength(255),
-                Forms\Components\Select::make('visit_type')->label(__('fields.visit_type'))->options(static::visitTypeOptions())->required(),
+                // Decided by whether this ID number already has an active
+                // session, and locked so it can never be picked by hand -
+                // the same rule the bulk import applies.
+                Forms\Components\Select::make('visit_type')
+                    ->label(__('fields.visit_type'))
+                    ->options(static::visitTypeOptions())
+                    ->default('new')
+                    ->disabled()
+                    ->dehydrated()
+                    ->live(),
             ])->columns(2);
+    }
+
+    /**
+     * Recompute the locked visit type from the ID number. Only meaningful while
+     * creating a record: a saved session keeps the visit type it was stored with.
+     */
+    public static function syncVisitType(Get $get, Set $set, $livewire): void
+    {
+        if (! $livewire instanceof \Filament\Resources\Pages\CreateRecord) {
+            return;
+        }
+
+        $set('visit_type', MotherToMotherDuplicateChecker::resolveVisitType($get('id_number')));
     }
 
     protected static function getParticipantDataSection(): \Filament\Schemas\Components\Component
@@ -106,7 +129,13 @@ class MotherToMotherResource extends Resource
                         'required' => __('ui.validation.identity_required'),
                         'regex' => __('ui.validation.identity_digits'),
                     ])
-                    ->maxLength(255),
+                    ->maxLength(255)
+                    ->live(onBlur: true)
+                    ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => static::syncVisitType($get, $set, $livewire))
+                    // Only the visit type depends on this field, so only that
+                    // component is re-rendered rather than the whole schema.
+                    ->partiallyRenderAfterStateUpdated()
+                    ->partiallyRenderComponentsAfterStateUpdated(['visit_type']),
                 Forms\Components\TextInput::make('full_name_ar')->label(__('fields.full_name_ar'))->required()->maxLength(255),
                 Forms\Components\Select::make('category')
                     ->label(__('fields.category'))

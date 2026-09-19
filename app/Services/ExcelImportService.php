@@ -7,9 +7,13 @@ use App\Imports\ImportDefinition;
 use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Models\FollowUpChildVisit;
+use App\Models\GroupSession;
 use App\Models\IndividualCounseling;
+use App\Models\MotherToMotherSession;
 use App\Models\PregnantLactatingWoman;
+use App\Support\GroupSessionDuplicateChecker;
 use App\Support\Import\ChildImportVisits;
+use App\Support\MotherToMotherDuplicateChecker;
 use App\Support\PregnantWomanDuplicateChecker;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -152,6 +156,26 @@ final class ExcelImportService
             $attributes['visit_type'] = PregnantWomanDuplicateChecker::resolveVisitType(
                 $attributes['mother_id'] ?? null,
                 $attributes['status_type'] ?? null,
+            );
+        }
+
+        if ($model instanceof GroupSession) {
+            // Same reason once more: a participant already registered is
+            // attending a follow-up. Read time is too early to ask - the
+            // module's deriver runs before anything is written, so every row
+            // of a bulk upload was compared against a table that did not yet
+            // hold the rows above it and came out "new".
+            $attributes['visit_type'] = GroupSessionDuplicateChecker::resolveVisitType(
+                $attributes['id_number'] ?? null,
+            );
+        }
+
+        if ($model instanceof MotherToMotherSession) {
+            // The mother-to-mother module counts attendance the same way its
+            // twin does, so it is settled here for the same reason: the rows
+            // above this one in the file are stored by now.
+            $attributes['visit_type'] = MotherToMotherDuplicateChecker::resolveVisitType(
+                $attributes['id_number'] ?? null,
             );
         }
 

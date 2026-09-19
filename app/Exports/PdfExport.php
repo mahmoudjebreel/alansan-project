@@ -73,8 +73,15 @@ class PdfExport
      * The split is by record count rather than by file size so the parts are
      * deterministic: the same report always splits in the same places, and a
      * part covers a range that can be named on the file itself.
+     *
+     * The number is set by how long the first part may take, not by how long
+     * the whole report takes - cutting it finer does not make the report any
+     * faster. A proxy in front of the site ends a request it has had no bytes
+     * from for a hundred seconds, and nothing at all is sent until the first
+     * part is closed, so that part has to finish well inside the limit on a
+     * shared host several times slower than a developer machine.
      */
-    public const CHUNK = 500;
+    public const CHUNK = 100;
 
     /**
      * Records fetched per round trip.
@@ -213,6 +220,8 @@ class PdfExport
         ?array $order,
     ): StreamedResponse {
         return response()->streamDownload(static function () use ($export, $title, $nameField, $section, $order): void {
+            self::unbuffer();
+
             $directory = self::temporaryDirectory();
 
             try {
@@ -274,6 +283,8 @@ class PdfExport
         return response()->streamDownload(static function () use (
             $export, $title, $nameField, $section, $chunk, $order, $base
         ): void {
+            self::unbuffer();
+
             $directory = self::temporaryDirectory();
 
             try {
@@ -395,6 +406,39 @@ class PdfExport
     }
 
     /**
+     * Let what the report writes leave PHP as it is written.
+     *
+     * The streaming this whole route is built around is only real if nothing
+     * downstream is holding the bytes. A shared host usually has PHP's own
+     * output_buffering on in php.ini, and the request has come through
+     * Laravel's stack besides, so by the time the callback runs there can be
+     * one or more buffers between an echo and the socket. Any of them is
+     * enough to keep the connection silent until the last part is written -
+     * which is exactly the silence the proxy in front of the site ends.
+     *
+     * Closing them is safe here: the response is a StreamedResponse, so its
+     * headers are already out and there is nothing left to be decided from
+     * anything still buffered.
+     *
+     * Not off the web, though. A buffer open outside a web request belongs to
+     * whatever is running the report - the test runner captures output in one
+     * of its own - and closing another tool's buffer breaks that tool rather
+     * than any proxy. There is nothing to stream to in that case either.
+     */
+    private static function unbuffer(): void
+    {
+        if (app()->runningInConsole()) {
+            return;
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+
+        ob_implicit_flush(true);
+    }
+
+    /**
      * Send a finished file to the client a block at a time, so handing it
      * over does not put back the memory the chunking just removed.
      */
@@ -409,6 +453,7 @@ class PdfExport
         try {
             while (! feof($handle)) {
                 echo fread($handle, 8192);
+                flush();
             }
         } finally {
             fclose($handle);
