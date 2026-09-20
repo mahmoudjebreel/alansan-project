@@ -256,10 +256,14 @@ final class ChildFollowUpTransfer
             'muac_mm' => $latestVisit->muac,
             'governorate' => $followUpChild->governorate ?: 'gaza',
             'location' => $followUpChild->shelter_name,
-            // The Children form's own defaults for the two columns the table
-            // will not store as NULL and the follow-up record does not carry.
+            // The Children form's own fixed values. Filament applies default()
+            // only to a record created through the form, so a row written by
+            // this transfer would otherwise open in the edit form with these
+            // fields blank and, being disabled, impossible to fill.
             'organization' => 'AEI',
             'implementing_partner' => 'SCI',
+            'municipality' => 'Gaza',
+            'screener_profession' => 'CHW',
             'source_follow_up_child_id' => $followUpChild->getKey(),
         ]);
     }
