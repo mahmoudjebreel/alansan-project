@@ -24,7 +24,7 @@ use App\Models\PregnantLactatingWoman;
  * different from the next:
  *
  *   Children              child ID + reporting date
- *   Pregnant / Lactating  mother ID + status + reporting date
+ *   Pregnant / Lactating  mother ID + reporting date
  *   Mother-to-Mother      mother ID + session date
  *   Group sessions        mother ID + session date + session subject
  *   Individual counseling mother ID + counseling date
@@ -77,19 +77,25 @@ final class ImportDuplicateGuard
     }
 
     /**
-     * Pregnant / Lactating Women: the same mother, in the same status, on the
-     * same reporting date.
+     * Pregnant / Lactating Women: the same mother on the same reporting date.
      *
-     * The status belongs in the key because a change of status is a new
-     * admission into a different care cycle - the module's own rule, unchanged
-     * here. A mother recorded as pregnant and then as pregnant + breastfeeding
-     * is therefore two visits even on one day, and the second is not refused.
+     * The status is deliberately NOT part of this key. It was, briefly, on the
+     * reasoning that a change of status opens a different care cycle - but that
+     * is a statement about the visit *type*, not about whether the visit
+     * happened twice. With the status in the key, one mother could be recorded
+     * as pregnant and again as breastfeeding on the very same day and both rows
+     * would be stored, which is one visit written down twice.
+     *
+     * A mother has one visit per reporting date. What that visit is called -
+     * new or follow-up, and on which of the status transitions - is settled
+     * entirely by PregnantWomanDuplicateChecker, which this class never
+     * consults and has not changed.
      */
     private static function pregnantWoman(array $attributes): ?string
     {
         $exists = self::exists(
             PregnantLactatingWoman::query(),
-            ['mother_id' => $attributes['mother_id'] ?? null, 'status_type' => $attributes['status_type'] ?? null],
+            ['mother_id' => $attributes['mother_id'] ?? null],
             'date_of_reporting',
             $attributes['date_of_reporting'] ?? null,
         );

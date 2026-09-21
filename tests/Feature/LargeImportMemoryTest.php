@@ -342,6 +342,200 @@ class LargeImportMemoryTest extends TestCase
     }
 
     /**
+     * The one entry has to describe the whole run, not just its row count.
+     *
+     * Everything below comes from something the import actually counted or
+     * measured - the importer's own tallies, the request's own clock, the
+     * uploaded file's own name. None of it is derived from the error messages,
+     * because one bad row can produce several of those and the count would then
+     * report more refused rows than the file has.
+     */
+    public function test_the_import_entry_describes_the_whole_run(): void
+    {
+        Activity::query()->delete();
+
+        $user = auth()->user();
+
+        $this->import($this->sheetOf(40));
+
+        $entry = Activity::query()->where('log_name', 'bulk')->sole();
+        $properties = $entry->properties;
+
+        // Who ran it.
+        $this->assertSame($user->getKey(), $entry->causer_id);
+        $this->assertSame($user::class, $entry->causer_type);
+
+        // What was run, on what, from which file.
+        $this->assertSame('Child', $properties['module']);
+        $this->assertSame('import', $properties['action']);
+        $this->assertStringEndsWith('.xlsx', $properties['file']);
+        $this->assertStringNotContainsString('/', $properties['file'], 'The entry must not carry a server path.');
+        $this->assertStringNotContainsString('\\', $properties['file']);
+
+        // How it ended, and the four row counts that say why.
+        $this->assertSame('success', $properties['status']);
+        $this->assertSame(40, $properties['total_rows']);
+        $this->assertSame(40, $properties['imported_rows']);
+        $this->assertSame(0, $properties['duplicate_rows']);
+        $this->assertSame(0, $properties['rejected_rows']);
+        $this->assertSame(0, $properties['error_count']);
+
+        // When, and for how long.
+        $this->assertNotNull(\Carbon\CarbonImmutable::parse($properties['started_at']));
+        $this->assertNotNull(\Carbon\CarbonImmutable::parse($properties['finished_at']));
+        $this->assertGreaterThanOrEqual(0, $properties['duration_ms']);
+        $this->assertLessThanOrEqual(
+            $properties['finished_at'],
+            $properties['started_at'],
+            'The import cannot have finished before it started.',
+        );
+    }
+
+    /**
+     * A file whose rows are all already in the system stores nothing - and is
+     * still a run somebody performed, so it still has to be on the record.
+     */
+    public function test_an_import_of_nothing_but_duplicates_is_still_audited(): void
+    {
+        $path = $this->sheetOf(12, idOffset: 400000);
+
+        $this->import($path);
+
+        Activity::query()->delete();
+
+        // The very same file a second time.
+        $result = $this->import($path);
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertCount(12, $result['skipped']);
+
+        $properties = Activity::query()->where('log_name', 'bulk')->sole()->properties;
+
+        $this->assertSame('success_with_duplicates', $properties['status']);
+        $this->assertSame(12, $properties['total_rows']);
+        $this->assertSame(0, $properties['imported_rows']);
+        $this->assertSame(12, $properties['duplicate_rows']);
+        $this->assertSame(0, $properties['rejected_rows']);
+    }
+
+    /**
+     * Some stored, some already present: the status says so, and the counts add
+     * up to the file.
+     */
+    public function test_a_part_duplicate_import_is_audited_as_such(): void
+    {
+        $this->import($this->sheetOf(10, idOffset: 500000));
+
+        Activity::query()->delete();
+
+        // The same ten rows, plus ten the system has not seen.
+        $this->import($this->sheetOf(20, idOffset: 500000));
+
+        $properties = Activity::query()->where('log_name', 'bulk')->sole()->properties;
+
+        $this->assertSame('success_with_duplicates', $properties['status']);
+        $this->assertSame(20, $properties['total_rows']);
+        $this->assertSame(10, $properties['imported_rows']);
+        $this->assertSame(10, $properties['duplicate_rows']);
+        $this->assertSame(0, $properties['rejected_rows']);
+    }
+
+    /**
+     * A refused file writes nothing to the module's table and one entry to the
+     * audit log saying why it wrote nothing.
+     *
+     * The rejected-row count is the number of ROWS refused, not the number of
+     * complaints made about them.
+     */
+    public function test_a_failed_import_is_audited_with_its_rejected_row_count(): void
+    {
+        Activity::query()->delete();
+
+        $headings = $this->headings();
+        $position = [];
+
+        foreach (['name', 'child_id', 'organization', 'implementing_partner', 'date_of_reporting', 'governorate', 'sex'] as $field) {
+            $position[$field] = array_search(__('fields.' . $field), $headings, true);
+        }
+
+        $rows = [$headings];
+
+        for ($i = 0; $i < 8; $i++) {
+            $row = array_fill(0, count($headings), null);
+            $row[$position['name']] = 'طفل ' . $i;
+            $row[$position['child_id']] = (string) (800000000 + $i);
+            $row[$position['organization']] = 'AEI';
+            $row[$position['implementing_partner']] = 'SCI';
+            $row[$position['governorate']] = 'gaza';
+            $row[$position['sex']] = 'ذكر';
+            // Two rows name a day that never happened.
+            $row[$position['date_of_reporting']] = in_array($i, [2, 5], true) ? '31/04/2026' : '2026-08-20';
+
+            $rows[] = $row;
+        }
+
+        $export = new class($rows) implements FromArray
+        {
+            public function __construct(private array $rows)
+            {
+            }
+
+            public function array(): array
+            {
+                return $this->rows;
+            }
+        };
+
+        $name = 'audit-failed-' . uniqid() . '.xlsx';
+        Excel::store($export, $name, 'local');
+
+        $result = $this->import(\Storage::disk('local')->path($name));
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertSame(0, Child::count());
+
+        $properties = Activity::query()->where('log_name', 'bulk')->sole()->properties;
+
+        $this->assertSame('failed', $properties['status']);
+        $this->assertSame(8, $properties['total_rows']);
+        $this->assertSame(0, $properties['imported_rows']);
+        $this->assertSame(0, $properties['duplicate_rows']);
+        $this->assertSame(2, $properties['rejected_rows']);
+        $this->assertGreaterThan(0, $properties['error_count']);
+    }
+
+    /**
+     * A file the module cannot read at all - wrong headings - is a failure with
+     * no rows to count, and is still recorded.
+     */
+    public function test_a_file_with_unusable_columns_is_audited_as_failed(): void
+    {
+        Activity::query()->delete();
+
+        $export = new class implements FromArray
+        {
+            public function array(): array
+            {
+                return [['Not', 'A', 'Children', 'Sheet'], ['a', 'b', 'c', 'd']];
+            }
+        };
+
+        $name = 'audit-unusable-' . uniqid() . '.xlsx';
+        Excel::store($export, $name, 'local');
+
+        $result = $this->import(\Storage::disk('local')->path($name));
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertNotSame([], $result['errors']);
+
+        $properties = Activity::query()->where('log_name', 'bulk')->sole()->properties;
+
+        $this->assertSame('failed', $properties['status']);
+        $this->assertSame(0, $properties['imported_rows']);
+        $this->assertGreaterThan(0, $properties['error_count']);
+    }
+
+    /**
      * Suppression is scoped to the import. An ordinary save afterwards is
      * audited exactly as it always was.
      */

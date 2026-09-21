@@ -313,14 +313,18 @@ class ChildFollowUpTransferTest extends TestCase
 
     public function test_every_manual_discharge_outcome_locks_the_record_without_creating_a_child(): void
     {
-        foreach (['discharge_to_opt', 'discharge_to_other', 'died'] as $outcome) {
+        // Defaulted is on this list with the rest of them. It used to be the
+        // exception - a manual outcome that left the episode open - and this
+        // test still asserted that long after the rule changed. A defaulter has
+        // left the programme: the missed visits stay recorded visit by visit,
+        // the episode closes, and a child who comes back is readmitted into a
+        // NEW episode that follows this one rather than reopening it. Being
+        // eligible for readmission is exactly why it has to close first.
+        foreach (['discharge_to_opt', 'discharge_to_other', 'died', 'defaulted'] as $outcome) {
             $record = FollowUpChild::factory()->create(['discharge_outcome' => $outcome]);
 
             $this->assertTrue($record->isLocked(), "[{$outcome}] must lock the record.");
         }
-
-        // Defaulted is a manual outcome that does not lock: the episode stays open.
-        $this->assertFalse(FollowUpChild::factory()->create(['discharge_outcome' => 'defaulted'])->isLocked());
 
         $this->assertSame(0, Child::count());
     }

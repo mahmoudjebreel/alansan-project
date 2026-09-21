@@ -46,10 +46,22 @@ final class ExcelImportService
         /** @var AbstractTableImport $importer */
         $importer = new $importerClass($definition);
 
+        // The audit summary states when the import ran and how long it took.
+        // Both come from the clock of the request that is already running, so
+        // no table and no column is needed to hold them - they ride along in
+        // the activity entry's own properties, like every other field below.
+        $startedAt = \Carbon\CarbonImmutable::now();
+        $startedTimer = microtime(true);
+
         Excel::import($importer, $path);
 
         if (! $importer->hasHeadings()) {
-            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')], 'skipped' => []];
+            return $this->finish(
+                $definition, $path, $startedAt, $startedTimer, $importer,
+                imported: 0,
+                skipped: [],
+                errors: [__('fields.import_empty_file')],
+            );
         }
 
         $missing = $importer->missingRequiredColumns();
@@ -72,7 +84,12 @@ final class ExcelImportService
                 ]);
             }
 
-            return ['imported' => 0, 'errors' => $errors, 'skipped' => []];
+            return $this->finish(
+                $definition, $path, $startedAt, $startedTimer, $importer,
+                imported: 0,
+                skipped: [],
+                errors: $errors,
+            );
         }
 
         $errors = $importer->errors();
@@ -81,13 +98,23 @@ final class ExcelImportService
         if ($errors !== []) {
             $importer->discardRows();
 
-            return ['imported' => 0, 'errors' => $errors, 'skipped' => []];
+            return $this->finish(
+                $definition, $path, $startedAt, $startedTimer, $importer,
+                imported: 0,
+                skipped: [],
+                errors: $errors,
+            );
         }
 
         if ($importer->dataRowCount() === 0) {
             $importer->discardRows();
 
-            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')], 'skipped' => []];
+            return $this->finish(
+                $definition, $path, $startedAt, $startedTimer, $importer,
+                imported: 0,
+                skipped: [],
+                errors: [__('fields.import_empty_file')],
+            );
         }
 
         $imported = 0;
@@ -159,40 +186,145 @@ final class ExcelImportService
             });
         } catch (RowImportException $e) {
             // The transaction has already rolled back: nothing was written.
-            return ['imported' => 0, 'errors' => [$e->getMessage()], 'skipped' => []];
+            return $this->finish(
+                $definition, $path, $startedAt, $startedTimer, $importer,
+                imported: 0,
+                skipped: [],
+                errors: [$e->getMessage()],
+            );
         } finally {
             $importer->discardRows();
         }
 
-        if ($imported > 0) {
-            $this->recordSummary($definition, $imported, $writtenKeys);
-        }
+        return $this->finish(
+            $definition, $path, $startedAt, $startedTimer, $importer,
+            imported: $imported,
+            skipped: $skipped,
+            errors: [],
+            sampleKeys: $writtenKeys,
+        );
+    }
 
-        return ['imported' => $imported, 'errors' => [], 'skipped' => $skipped];
+    /**
+     * Close one import: write its audit entry and return its result.
+     *
+     * Every way out of import() comes through here, which is the point. The
+     * summary used to be written on the success path alone and only when at
+     * least one row was stored, so the two runs an auditor most wants to find -
+     * a file that was refused outright, and a file every row of which was
+     * already in the system - left no trace at all. A run that did nothing is
+     * still a run somebody performed.
+     *
+     * @param  array<int, string>  $skipped
+     * @param  array<int, string>  $errors
+     * @param  array<int, mixed>  $sampleKeys
+     * @return array{imported: int, errors: array<string>, skipped: array<string>}
+     */
+    private function finish(
+        ImportDefinition $definition,
+        string $path,
+        \Carbon\CarbonImmutable $startedAt,
+        float $startedTimer,
+        AbstractTableImport $importer,
+        int $imported,
+        array $skipped,
+        array $errors,
+        array $sampleKeys = [],
+    ): array {
+        $this->recordSummary(
+            definition: $definition,
+            path: $path,
+            startedAt: $startedAt,
+            startedTimer: $startedTimer,
+            importer: $importer,
+            imported: $imported,
+            skipped: count($skipped),
+            errors: $errors,
+            sampleKeys: $sampleKeys,
+        );
+
+        return ['imported' => $imported, 'errors' => $errors, 'skipped' => $skipped];
     }
 
     /**
      * One activity entry for the whole import, in place of one per row.
      *
-     * The same shape BulkRecordWriter writes for a bulk delete, and for the
-     * same reason: the entry names the module and the count, because there is
-     * no single subject, and the sample of IDs is what lets an operator find
-     * the affected rows afterwards.
+     * The same log and the same shape BulkRecordWriter writes for a bulk
+     * delete, and for the same reason: the entry names the module and the
+     * counts, because there is no single subject, and the sample of IDs is what
+     * lets an operator find the affected rows afterwards.
+     *
+     * What it says is the whole run: who ran it, on which module, from which
+     * file, when, for how long, how many rows the file held, how many were
+     * stored, how many were already in the system, how many were refused, and
+     * how it ended. All of that goes into the properties column the activity
+     * log already has - no new table, no new column, and nothing derived that
+     * could be wrong: the row counts come from the importer's own tallies.
+     *
+     * Writing the entry can never cancel an import. It runs after the
+     * transaction has closed, and a failure to audit is logged and swallowed
+     * rather than thrown - losing the record of an import is bad, losing the
+     * import itself over it would be worse.
+     *
+     * @param  array<int, string>  $errors
+     * @param  array<int, mixed>  $sampleKeys
      */
-    private function recordSummary(ImportDefinition $definition, int $imported, array $sampleKeys): void
-    {
+    private function recordSummary(
+        ImportDefinition $definition,
+        string $path,
+        \Carbon\CarbonImmutable $startedAt,
+        float $startedTimer,
+        AbstractTableImport $importer,
+        int $imported,
+        int $skipped,
+        array $errors,
+        array $sampleKeys,
+    ): void {
         $module = class_basename($definition->model);
 
-        activity()
-            ->useLog('bulk')
-            ->causedBy(auth()->user())
-            ->withProperties([
-                'module' => $module,
-                'action' => 'import',
-                'count' => $imported,
-                'sample_ids' => array_slice($sampleKeys, 0, 20),
-            ])
-            ->log("{$module} bulk import ({$imported})");
+        // Failed: nothing was stored and something was wrong with the file.
+        // Success with duplicates: rows were stored and rows were recognised as
+        // already present. Success: everything the file offered was taken.
+        $status = match (true) {
+            $errors !== [] => 'failed',
+            $skipped > 0 => 'success_with_duplicates',
+            default => 'success',
+        };
+
+        try {
+            activity()
+                ->useLog('bulk')
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'module' => $module,
+                    'action' => 'import',
+                    'status' => $status,
+                    // The name of the uploaded file as it was stored. The
+                    // directory is left out: it is the same for every import
+                    // and it is a server path, which an audit entry has no
+                    // business carrying.
+                    'file' => basename($path),
+                    'total_rows' => $importer->totalRowCount(),
+                    'imported_rows' => $imported,
+                    'duplicate_rows' => $skipped,
+                    'rejected_rows' => $importer->rejectedRowCount(),
+                    'error_count' => count($errors),
+                    'started_at' => $startedAt->toIso8601String(),
+                    'finished_at' => \Carbon\CarbonImmutable::now()->toIso8601String(),
+                    'duration_ms' => (int) round((microtime(true) - $startedTimer) * 1000),
+                    'sample_ids' => array_slice($sampleKeys, 0, 20),
+                    // 'count' is what BulkRecordWriter's entries carry and what
+                    // anything reading the bulk log already looks for. Kept so
+                    // the richer entry stays readable to it.
+                    'count' => $imported,
+                ])
+                ->log("{$module} bulk import ({$imported})");
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                'Import audit entry could not be written: ' . $e->getMessage(),
+                ['exception' => $e, 'module' => $module],
+            );
+        }
     }
 
     /**

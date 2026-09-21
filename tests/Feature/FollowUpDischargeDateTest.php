@@ -99,6 +99,56 @@ class FollowUpDischargeDateTest extends TestCase
         $this->assertNotContains(FollowUpChild::ACTIVE_OUTCOME, FollowUpChild::CLOSING_OUTCOMES);
     }
 
+    /**
+     * Defaulted, specifically.
+     *
+     * It is the outcome that most recently changed sides: it used to leave the
+     * episode open, and it now closes it like every other exit. That is
+     * deliberate and it is what makes a later readmission possible - a child
+     * who comes back is readmitted into a NEW episode following this one, and
+     * an episode that never closed could not be followed by anything. So the
+     * date is required here exactly as it is for cured or died, and the record
+     * locks once it has one.
+     */
+    public function test_defaulted_closes_the_episode_and_requires_a_discharge_date(): void
+    {
+        $this->assertContains('defaulted', FollowUpChild::CLOSING_OUTCOMES);
+        $this->assertTrue(FollowUpDischargeRule::closes('defaulted'));
+
+        // Without a date: refused.
+        $this->assertCount(1, FollowUpDischargeRule::violations('defaulted', null, '2026-06-01'));
+
+        // With one: accepted.
+        $this->assertSame([], FollowUpDischargeRule::violations('defaulted', '2026-08-20', '2026-06-01'));
+    }
+
+    public function test_a_defaulted_row_without_a_discharge_date_is_refused_on_import(): void
+    {
+        $result = $this->import([__('fields.discharge_outcome') => __('fields.defaulted')]);
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertCount(1, $result['errors']);
+        $this->assertStringContainsString(__('fields.defaulted'), $result['errors'][0]);
+        $this->assertSame(0, FollowUpChild::count());
+    }
+
+    public function test_a_defaulted_row_with_a_discharge_date_imports_and_locks_the_record(): void
+    {
+        $result = $this->import([
+            __('fields.discharge_outcome') => __('fields.defaulted'),
+            __('fields.discharge_date') => '2026-08-20',
+        ]);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(1, $result['imported']);
+
+        $record = FollowUpChild::first();
+
+        $this->assertSame('defaulted', $record->discharge_outcome);
+        $this->assertSame('2026-08-20', $record->discharge_date->format('Y-m-d'));
+        $this->assertTrue($record->isLocked(), 'A defaulted episode is closed and must be locked.');
+    }
+
     public function test_under_follow_up_may_have_no_discharge_date(): void
     {
         $this->assertFalse(FollowUpDischargeRule::closes(FollowUpChild::ACTIVE_OUTCOME));

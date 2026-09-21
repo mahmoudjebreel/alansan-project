@@ -351,6 +351,106 @@ class ImportDuplicateAndVisitTypeTest extends TestCase
         $this->assertSame(1, PregnantLactatingWoman::where('mother_id', '123456789')->count());
     }
 
+    /**
+     * The status is not part of the duplicate key.
+     *
+     * A mother has one visit per reporting date. Recording her as pregnant and
+     * again as breastfeeding on the same day is that one visit written down
+     * twice, not two visits - whatever the two rows say about her status. The
+     * key was briefly mother + status + date, and under it both rows stored.
+     *
+     * @dataProvider differingSameDayStatuses
+     */
+    public function test_the_same_mother_on_the_same_date_is_a_duplicate_whatever_the_status(
+        string $first,
+        string $second,
+    ): void {
+        $this->import('pregnant', [$this->pregnantRow([
+            __('fields.status_type') => $first,
+        ])]);
+
+        $result = $this->import('pregnant', [$this->pregnantRow([
+            // The same reporting date; only the status differs.
+            __('fields.status_type') => $second,
+        ])]);
+
+        $this->assertSame(0, $result['imported']);
+        $this->assertSkippedAsDuplicate($result, 2, __('fields.import_duplicate_visit'));
+        $this->assertSame(
+            1,
+            PregnantLactatingWoman::where('mother_id', '123456789')->count(),
+            "[{$first}] then [{$second}] on one day must not store a second record.",
+        );
+
+        // And the record that is there is the first one, untouched.
+        $this->assertSame($first, $this->latestWoman()->status_type);
+    }
+
+    /**
+     * Every pair of different statuses, in both directions.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function differingSameDayStatuses(): array
+    {
+        $statuses = ['pregnant', 'lactating', 'pregnant_lactating'];
+        $pairs = [];
+
+        foreach ($statuses as $first) {
+            foreach ($statuses as $second) {
+                if ($first !== $second) {
+                    $pairs["{$first} then {$second}"] = [$first, $second];
+                }
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * The other half of the same rule: a different date is a different visit,
+     * and the visit type it is given is whatever the status transition says -
+     * which the duplicate change did not touch.
+     *
+     * @dataProvider differingSameDayStatuses
+     */
+    public function test_the_same_mother_on_a_different_date_with_a_different_status_is_not_a_duplicate(
+        string $first,
+        string $second,
+    ): void {
+        $this->import('pregnant', [$this->pregnantRow([
+            __('fields.status_type') => $first,
+        ])]);
+
+        $result = $this->import('pregnant', [$this->pregnantRow([
+            __('fields.status_type') => $second,
+            __('fields.date_of_reporting') => '2026-09-20',
+        ])]);
+
+        $this->assertImportedCleanly($result, 1);
+        $this->assertSame(2, PregnantLactatingWoman::where('mother_id', '123456789')->count());
+
+        // Every change of status is a new admission; that rule is unchanged.
+        $this->assertSame('new', $this->latestWoman()->visit_type);
+    }
+
+    /**
+     * Two rows for one mother on one day, inside a single upload. The second is
+     * compared against the first once it is stored, not only against what was
+     * in the system before the file was opened.
+     */
+    public function test_two_rows_for_one_mother_on_one_day_in_the_same_file_store_once(): void
+    {
+        $result = $this->import('pregnant', [
+            $this->pregnantRow([__('fields.status_type') => 'pregnant']),
+            $this->pregnantRow([__('fields.status_type') => 'lactating']),
+        ]);
+
+        $this->assertSame(1, $result['imported']);
+        $this->assertSkippedAsDuplicate($result, 3, __('fields.import_duplicate_visit'));
+        $this->assertSame(1, PregnantLactatingWoman::where('mother_id', '123456789')->count());
+    }
+
     // =================================================================
     // C2.3 Mother-to-Mother
     // =================================================================

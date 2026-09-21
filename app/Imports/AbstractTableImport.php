@@ -89,6 +89,16 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
     /** @var array<int, string> */
     private array $errors = [];
 
+    /**
+     * Rows refused outright, counted rather than derived.
+     *
+     * One row can break several rules and so contribute several messages, so
+     * counting $errors would report more refused rows than the file has. The
+     * import's audit summary states this number, and a stated number has to be
+     * the true one.
+     */
+    private int $rowsRejected = 0;
+
     private readonly ImportSchema $schema;
 
     private readonly ImportDefinition $definition;
@@ -303,9 +313,29 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
         return $this->headingsRead && $this->columnMap !== [];
     }
 
+    /**
+     * Rows of the file that validated, whether or not they were later written.
+     */
     public function dataRowCount(): int
     {
         return $this->rowsWritten;
+    }
+
+    /**
+     * Rows of the file that were refused before anything was written.
+     */
+    public function rejectedRowCount(): int
+    {
+        return $this->rowsRejected;
+    }
+
+    /**
+     * Data rows read from the file: the ones that validated and the ones that
+     * did not.
+     */
+    public function totalRowCount(): int
+    {
+        return $this->rowsWritten + $this->rowsRejected;
     }
 
     // ---------------------------------------------------------------------
@@ -453,6 +483,8 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
         ));
 
         if ($messages !== []) {
+            $this->rowsRejected++;
+
             foreach ($messages as $message) {
                 $this->errors[] = __('fields.import_row_error', ['row' => $rowNumber, 'message' => $message]);
             }
