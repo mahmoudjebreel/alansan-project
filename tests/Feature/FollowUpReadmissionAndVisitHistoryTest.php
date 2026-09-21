@@ -813,6 +813,8 @@ class FollowUpReadmissionAndVisitHistoryTest extends TestCase
         $row[array_search(__('fields.governorate'), $headings, true)] = 'Gaza';
         $row[array_search(__('fields.admission_type'), $headings, true)] = __('fields.readmission');
         $row[array_search(__('fields.discharge_outcome'), $headings, true)] = 'Referred For Medical Reason(inpt)';
+        // A closing outcome has to say when it closed; a referral out is one.
+        $row[array_search(__('fields.discharge_date'), $headings, true)] = '2026-09-02';
         $row[array_search(__('fields.visit_date_n', ['n' => 1]), $headings, true)] = '2026-08-19';
         $row[array_search(__('fields.visit_muac_n', ['n' => 1]), $headings, true)] = 110;
         $row[array_search(__('fields.visit_date_n', ['n' => 2]), $headings, true)] = '2026-08-26';

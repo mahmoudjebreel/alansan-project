@@ -156,9 +156,46 @@ trait HasExcelImport
             $result['imported'],
         );
 
+        $skipped = $result['skipped'] ?? [];
+
+        if ($skipped !== []) {
+            $this->notifySkipped($result['imported'], $skipped);
+
+            return;
+        }
+
         Notification::make()
             ->title(__('fields.import_success', ['count' => $result['imported']]))
             ->success()
+            ->send();
+    }
+
+    /**
+     * Rows that were already in the system.
+     *
+     * Not a failure - the rows around them imported - but not silence either.
+     * A re-uploaded file is the normal way the teams add a month, and they have
+     * to be able to see which of its rows the system already held and which it
+     * took, rather than reading "40 rows imported" off a file of a hundred and
+     * guessing about the other sixty.
+     */
+    protected function notifySkipped(int $imported, array $skipped): void
+    {
+        $shown = array_slice($skipped, 0, 15);
+
+        $body = __('fields.import_skipped_heading', ['count' => count($skipped)])
+            . '<br><br>'
+            . collect($shown)->map(fn (string $e): string => e($e))->implode('<br>');
+
+        if (count($skipped) > count($shown)) {
+            $body .= '<br>…';
+        }
+
+        Notification::make()
+            ->title(__('fields.import_success', ['count' => $imported]))
+            ->body(new \Illuminate\Support\HtmlString($body))
+            ->warning()
+            ->persistent()
             ->send();
     }
 

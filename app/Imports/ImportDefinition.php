@@ -10,6 +10,7 @@ use App\Exports\IndividualCounselingExport;
 use App\Exports\MotherToMotherExport;
 use App\Exports\PregnantWomenExport;
 use App\Models\Child;
+use App\Support\FollowUpDischargeRule;
 use App\Support\Import\ChildImportDates;
 use App\Support\Import\ImportedRowDeriver;
 use App\Support\Import\PregnantWomanImportDates;
@@ -75,6 +76,15 @@ final class ImportDefinition
      *                                   array. Without one, a bulk upload is the
      *                                   one door through which a hand-typed
      *                                   visit type reaches the database.
+     * @param  callable|null  $rowValidator  Rules that hold between columns of one
+     *                                   row rather than inside a single cell -
+     *                                   a discharge date that a closing outcome
+     *                                   requires, a discharge that precedes its
+     *                                   admission. Takes the derived attribute
+     *                                   array and returns the messages it
+     *                                   breaks, empty when the row is sound.
+     *                                   Only the modules that have such a rule
+     *                                   name one.
      */
     public function __construct(
         public readonly string $key,
@@ -90,7 +100,23 @@ final class ImportDefinition
         public readonly array $collapseWhitespace = [],
         public readonly ?string $dateReader = null,
         public readonly mixed $deriver = null,
+        public readonly mixed $rowValidator = null,
     ) {
+    }
+
+    /**
+     * Apply this module's cross-column rules to one uploaded row.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<int, string>
+     */
+    public function validateRow(array $attributes): array
+    {
+        if (! is_callable($this->rowValidator)) {
+            return [];
+        }
+
+        return ($this->rowValidator)($attributes);
     }
 
     /**
@@ -1029,6 +1055,12 @@ final class ImportDefinition
                         'Under Followup' => 'under_follow_up',
                     ],
                 ],
+                // A closed episode must say when it closed, and a discharge
+                // cannot precede its admission. The manual form has asked for
+                // the first of those for a while; an upload asked for neither,
+                // so a file could close a hundred episodes with no date on any
+                // of them and the reports would count none of the discharges.
+                rowValidator: [FollowUpDischargeRule::class, 'forImportedRow'],
             ),
         ])->keyBy('key')->all();
     }
@@ -1076,6 +1108,21 @@ final class ImportDefinition
     public function moduleKeyForNotifications(): string
     {
         return class_basename($this->model);
+    }
+
+    /**
+     * Whether this module's rows must be written in the order the visits
+     * happened rather than in the order the file lists them.
+     *
+     * Only Children. A Children row is a visit, and a visit's type depends on
+     * the visits stored before it, so a July row saved before a June one would
+     * have made June the "follow-up" of July.
+     *
+     * @see \App\Support\Import\ChildImportVisits
+     */
+    public function sortsRowsByReportingDate(): bool
+    {
+        return $this->model === Child::class;
     }
 
     /**

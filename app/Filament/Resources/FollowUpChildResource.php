@@ -11,6 +11,7 @@ use App\Models\FollowUpChildVisit;
 use App\Filament\Resources\FollowUpChildResource\Actions\ReadmissionAction;
 use App\Filament\Resources\FollowUpChildResource\Actions\ReferToChildrenAction;
 use App\Support\FilamentInfolist;
+use App\Support\FollowUpDischargeRule;
 use App\Support\MuacClassifier;
 use Filament\Forms;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -423,7 +424,26 @@ class FollowUpChildResource extends Resource
                 Forms\Components\DatePicker::make('discharge_date')
                     ->label(__('fields.discharge_date'))
                     ->rules(['date'])
-                    ->requiredIf('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES),
+                    ->requiredIf('discharge_outcome', FollowUpChild::CLOSING_OUTCOMES)
+                    // A discharge cannot precede the admission it ends. The
+                    // required rule above has been asking for the date for a
+                    // while; nothing checked it was a date that could have
+                    // happened, so an episode admitted on the 20th could be
+                    // discharged on the 10th and the reports counted the
+                    // discharge in the wrong month.
+                    ->rule(static function (Get $get): \Closure {
+                        return static function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
+                            $messages = FollowUpDischargeRule::violations(
+                                $get('discharge_outcome'),
+                                $value,
+                                $get('admission_date'),
+                            );
+
+                            foreach ($messages as $message) {
+                                $fail($message);
+                            }
+                        };
+                    }),
                 Forms\Components\Select::make('discharge_outcome')
                     ->label(__('fields.discharge_outcome'))
                     ->options(static::dischargeOutcomeOptions()),

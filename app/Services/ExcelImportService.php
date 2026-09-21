@@ -13,6 +13,7 @@ use App\Models\MotherToMotherSession;
 use App\Models\PregnantLactatingWoman;
 use App\Support\GroupSessionDuplicateChecker;
 use App\Support\Import\ChildImportVisits;
+use App\Support\Import\ImportDuplicateGuard;
 use App\Support\MotherToMotherDuplicateChecker;
 use App\Support\PregnantWomanDuplicateChecker;
 use Illuminate\Database\Eloquent\Model;
@@ -25,11 +26,18 @@ use Maatwebsite\Excel\Facades\Excel;
  * Behaviour is strict all-or-nothing: every row is validated first and, if a
  * single row is invalid, nothing at all is written and every problem is
  * reported. A valid file is committed inside one transaction.
+ *
+ * A duplicate is the one thing that does not cancel the file. It is not an
+ * invalid row - it is a row describing a visit the system already holds - and
+ * refusing the upload over it would make the ordinary working habit impossible:
+ * the teams append the new month to last month's file and upload the whole
+ * thing again. So a duplicate is skipped and named, row by row, in the
+ * 'skipped' half of the result, and the rows around it import.
  */
 final class ExcelImportService
 {
     /**
-     * @return array{imported: int, errors: array<string>}
+     * @return array{imported: int, errors: array<string>, skipped: array<string>}
      */
     public function import(ImportDefinition $definition, string $path): array
     {
@@ -41,7 +49,7 @@ final class ExcelImportService
         Excel::import($importer, $path);
 
         if (! $importer->hasHeadings()) {
-            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')]];
+            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')], 'skipped' => []];
         }
 
         $missing = $importer->missingRequiredColumns();
@@ -64,65 +72,139 @@ final class ExcelImportService
                 ]);
             }
 
-            return ['imported' => 0, 'errors' => $errors];
+            return ['imported' => 0, 'errors' => $errors, 'skipped' => []];
         }
 
         $errors = $importer->errors();
-        $rows = $importer->rows();
 
         // Strict all-or-nothing: a single bad row cancels the whole file.
         if ($errors !== []) {
-            return ['imported' => 0, 'errors' => $errors];
+            $importer->discardRows();
+
+            return ['imported' => 0, 'errors' => $errors, 'skipped' => []];
         }
 
-        if ($rows === []) {
-            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')]];
-        }
+        if ($importer->dataRowCount() === 0) {
+            $importer->discardRows();
 
-        // Children rows are visits, and a visit's type depends on the visits
-        // stored before it - so they are written in the order they happened,
-        // whatever order the file lists them in.
-        if ($definition->model === Child::class) {
-            $rows = ChildImportVisits::inVisitOrder($rows);
+            return ['imported' => 0, 'errors' => [__('fields.import_empty_file')], 'skipped' => []];
         }
 
         $imported = 0;
+        $skipped = [];
+        $writtenKeys = [];
 
         try {
-            DB::transaction(function () use ($definition, $rows, &$imported): void {
-                foreach ($rows as $row) {
-                    try {
-                        if ($this->createRecord($definition, $row['attributes'], $row['visits'], $row['followups'] ?? [])) {
-                            $imported++;
+            // One transaction still, because the whole file has already been
+            // validated by this point: a rollback here is an unexpected
+            // database failure, not a bad row, and half a file written in that
+            // case is worse than none. What has changed is that the rows are
+            // no longer all in memory while it runs - they are streamed off
+            // disk one at a time.
+            //
+            // The per-row activity entries are held back for the duration.
+            // Spatie writes one INSERT carrying the whole row as JSON for every
+            // record saved, which on a large file is a second copy of the
+            // import inside the same transaction. One entry naming the module
+            // and the count replaces them, exactly as BulkRecordWriter already
+            // does for a bulk delete. Model events still fire, so nothing the
+            // records themselves derive is affected.
+            activity()->withoutLogs(function () use ($importer, $definition, &$imported, &$skipped, &$writtenKeys): void {
+                DB::transaction(function () use ($importer, $definition, &$imported, &$skipped, &$writtenKeys): void {
+                    foreach ($importer->eachRow() as $row) {
+                        try {
+                            $duplicate = ImportDuplicateGuard::reason($definition, $row['attributes'], $row['visits']);
+
+                            if ($duplicate !== null) {
+                                // Reported, never silent - but not fatal
+                                // either. A file re-uploaded with one more
+                                // month appended has to import that month, and
+                                // refusing the whole upload over the rows that
+                                // were already in the system would make that
+                                // impossible.
+                                $skipped[] = __('fields.import_row_error', [
+                                    'row' => $row['row'],
+                                    'message' => $duplicate,
+                                ]);
+
+                                continue;
+                            }
+
+                            $record = $this->createRecord(
+                                $definition,
+                                $row['attributes'],
+                                $row['visits'],
+                                $row['followups'] ?? [],
+                            );
+
+                            if ($record !== null) {
+                                $imported++;
+
+                                if (count($writtenKeys) < 20) {
+                                    $writtenKeys[] = $record->getKey();
+                                }
+                            }
+                        } catch (\Illuminate\Database\QueryException $e) {
+                            // Surface the offending row instead of a raw SQL dump.
+                            throw new RowImportException(
+                                __('fields.import_row_error', [
+                                    'row' => $row['row'],
+                                    'message' => $this->summarise($e),
+                                ]),
+                                previous: $e,
+                            );
                         }
-                    } catch (\Illuminate\Database\QueryException $e) {
-                        // Surface the offending row instead of a raw SQL dump.
-                        throw new RowImportException(
-                            __('fields.import_row_error', [
-                                'row' => $row['row'],
-                                'message' => $this->summarise($e),
-                            ]),
-                            previous: $e,
-                        );
                     }
-                }
+                });
             });
         } catch (RowImportException $e) {
             // The transaction has already rolled back: nothing was written.
-            return ['imported' => 0, 'errors' => [$e->getMessage()]];
+            return ['imported' => 0, 'errors' => [$e->getMessage()], 'skipped' => []];
+        } finally {
+            $importer->discardRows();
         }
 
-        return ['imported' => $imported, 'errors' => []];
+        if ($imported > 0) {
+            $this->recordSummary($definition, $imported, $writtenKeys);
+        }
+
+        return ['imported' => $imported, 'errors' => [], 'skipped' => $skipped];
+    }
+
+    /**
+     * One activity entry for the whole import, in place of one per row.
+     *
+     * The same shape BulkRecordWriter writes for a bulk delete, and for the
+     * same reason: the entry names the module and the count, because there is
+     * no single subject, and the sample of IDs is what lets an operator find
+     * the affected rows afterwards.
+     */
+    private function recordSummary(ImportDefinition $definition, int $imported, array $sampleKeys): void
+    {
+        $module = class_basename($definition->model);
+
+        activity()
+            ->useLog('bulk')
+            ->causedBy(auth()->user())
+            ->withProperties([
+                'module' => $module,
+                'action' => 'import',
+                'count' => $imported,
+                'sample_ids' => array_slice($sampleKeys, 0, 20),
+            ])
+            ->log("{$module} bulk import ({$imported})");
     }
 
     /**
      * Persist one row through the model, so accessors/mutators still run and
      * derived values (FI, MUAC degree) are recalculated rather than imported.
      *
-     * Returns false for a row that was not written because the visit it
-     * describes is already in the system.
+     * Whether the row is a duplicate is settled before this is called, by
+     * ImportDuplicateGuard - it used to be answered halfway down this method
+     * for Children and nowhere at all for the other five modules, and a row it
+     * turned down simply vanished without a word.
      */
-    private function createRecord(ImportDefinition $definition, array $attributes, array $visits, array $followups = []): bool
+    private function createRecord(ImportDefinition $definition, array $attributes, array $visits, array $followups = []): ?Model
     {
         /** @var class-string<Model> $modelClass */
         $modelClass = $definition->model;
@@ -137,11 +219,6 @@ final class ExcelImportService
         );
 
         if ($model instanceof Child) {
-            // The same file uploaded twice must not store every visit twice.
-            if (ChildImportVisits::alreadyStored($attributes)) {
-                return false;
-            }
-
             // Settled here, once the earlier visits of this file are stored,
             // rather than at read time when none of them were yet.
             $attributes['visit_type'] = ChildImportVisits::visitType($attributes);
@@ -209,7 +286,7 @@ final class ExcelImportService
             }
         }
 
-        return true;
+        return $model;
     }
 
     /**

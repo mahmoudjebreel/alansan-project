@@ -790,6 +790,10 @@ class ModuleImportSynonymsTest extends TestCase
             __('fields.sex') => 'Male',
             __('fields.admitted_with') => 'Moderate Acute Malnutrition',
             __('fields.discharge_outcome') => 'Recovered',
+            // "Recovered" is "cured", which closes the case, and a closed case
+            // has to say when it closed. The Arabic sheet above stays under
+            // follow-up, which is the one outcome that needs no date.
+            __('fields.discharge_date') => '2026-08-19',
         ])]);
 
         $this->assertSame([], $result['errors']);

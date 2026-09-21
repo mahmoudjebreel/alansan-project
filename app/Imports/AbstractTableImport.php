@@ -2,6 +2,7 @@
 
 namespace App\Imports;
 
+use App\Support\Import\ImportDateParser;
 use App\Support\ImportSchema;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
@@ -36,8 +37,54 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
     /** Absolute sheet row number of the last row consumed. */
     private int $rowCursor = 0;
 
-    /** @var array<int, array{row: int, attributes: array, visits: array, followups: array}> */
-    private array $rows = [];
+    /**
+     * Validated rows, held on disk rather than in memory.
+     *
+     * One JSON object per line. Every validated row used to be kept in a PHP
+     * array until the whole file had been read, so a 150,000-row upload held
+     * 150,000 attribute arrays at once and the process died long before it
+     * reached the database - the chunked *reading* below kept the spreadsheet
+     * out of memory and then the importer put the rows straight back in.
+     *
+     * Written through a small buffer and read back one line at a time, so the
+     * memory this costs is the buffer, whatever the size of the file.
+     */
+    private ?string $spillPath = null;
+
+    /** @var resource|null */
+    private $spillHandle = null;
+
+    /** @var array<int, string> */
+    private array $buffer = [];
+
+    /** Rows written to the spill file so far. */
+    private int $rowsWritten = 0;
+
+    /** Byte position the next row will be written at. */
+    private int $spillOffset = 0;
+
+    /**
+     * Where each row starts in the spill file, for the one module that has to
+     * read them back in an order other than the file's own.
+     *
+     * Kept as reporting day => the byte offsets of that day's rows, in the
+     * order the file listed them. Deliberately not a list of (day, row, offset)
+     * tuples: a three-element PHP array per row costs a few hundred bytes, so
+     * that shape was itself growing with the file - a tenth of the problem it
+     * was there to solve, but the same shape of problem. A file spans a few
+     * hundred distinct days at most, so this is a handful of keys over packed
+     * lists of integers, and sorting it is a ksort over those keys rather than
+     * a sort over every row.
+     *
+     * Rows within one day keep their file order, which is what the tie-break on
+     * sheet position always did.
+     *
+     * @var array<string, array<int, int>>
+     */
+    private array $index = [];
+
+    /** Rows held before the buffer is flushed to disk. */
+    private const BUFFER_ROWS = 500;
 
     /** @var array<int, string> */
     private array $errors = [];
@@ -68,11 +115,88 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
     }
 
     /**
-     * @return array<int, array{row: int, attributes: array, visits: array, followups: array}>
+     * The validated rows, one at a time, read back off the spill file.
+     *
+     * A generator rather than an array on purpose: the caller writes each row
+     * and lets go of it, so the commit costs one row of memory instead of the
+     * whole file. Rows come back in the order they were read, except for the
+     * module that asked for visit order, where they come back in the order the
+     * visits happened.
+     *
+     * @return \Generator<int, array{row: int, attributes: array, visits: array, followups: array}>
      */
-    public function rows(): array
+    public function eachRow(): \Generator
     {
-        return $this->rows;
+        $this->flush();
+
+        if ($this->spillPath === null || $this->rowsWritten === 0) {
+            return;
+        }
+
+        $handle = fopen($this->spillPath, 'rb');
+
+        if ($handle === false) {
+            return;
+        }
+
+        try {
+            if ($this->definition->sortsRowsByReportingDate()) {
+                // A file is not always written in date order, and a July row
+                // saved before a June one would have made June the "follow-up"
+                // of July. Reporting days sort as "Y-m-d" strings, and each
+                // day's rows are already in file order.
+                $index = $this->index;
+                ksort($index);
+
+                foreach ($index as $offsets) {
+                    foreach ($offsets as $offset) {
+                        fseek($handle, $offset);
+                        $line = fgets($handle);
+
+                        if ($line !== false) {
+                            yield json_decode($line, true);
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            while (($line = fgets($handle)) !== false) {
+                if (trim($line) === '') {
+                    continue;
+                }
+
+                yield json_decode($line, true);
+            }
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /**
+     * Release the spill file. Safe to call more than once, and called for a
+     * failed import as well as a successful one.
+     */
+    public function discardRows(): void
+    {
+        if ($this->spillHandle !== null) {
+            fclose($this->spillHandle);
+            $this->spillHandle = null;
+        }
+
+        if ($this->spillPath !== null && is_file($this->spillPath)) {
+            @unlink($this->spillPath);
+        }
+
+        $this->spillPath = null;
+        $this->buffer = [];
+        $this->index = [];
+    }
+
+    public function __destruct()
+    {
+        $this->discardRows();
     }
 
     /**
@@ -181,7 +305,7 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
 
     public function dataRowCount(): int
     {
-        return count($this->rows);
+        return $this->rowsWritten;
     }
 
     // ---------------------------------------------------------------------
@@ -282,6 +406,11 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
 
         $messages = array_merge($messages, $this->validateRow($attributes, $rejected));
 
+        // Rules that hold between columns rather than inside one cell, and only
+        // for the modules that have any. Run after derive() so they see the
+        // values that will actually be stored.
+        $messages = array_merge($messages, $this->definition->validateRow($attributes));
+
         // A visit is its date, exactly as the manual form now reads it: two
         // blank cells are a gap in the sheet and are dropped, a date with no
         // measurement is a visit that happened without one being taken, and a
@@ -331,12 +460,98 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
             return;
         }
 
-        $this->rows[] = [
+        $this->spill([
             'row' => $rowNumber,
             'attributes' => $attributes,
             'visits' => $visits,
             'followups' => $followups,
-        ];
+        ]);
+    }
+
+    // ---------------------------------------------------------------------
+    // Validated rows, held on disk
+    // ---------------------------------------------------------------------
+
+    /**
+     * Hand one validated row to the spill file.
+     *
+     * Dates arrive as Carbon instances and come back as "Y-m-d" strings, which
+     * is what the models take anyway: every date column is cast, so the value
+     * is turned back into a date on the way in. Nothing else about the row
+     * survives the round trip differently.
+     *
+     * @param  array{row: int, attributes: array, visits: array, followups: array}  $row
+     */
+    private function spill(array $row): void
+    {
+        $row['attributes'] = $this->flatten($row['attributes']);
+        $row['visits'] = array_map(fn (array $visit): array => $this->flatten($visit), $row['visits']);
+        $row['followups'] = array_map(fn (array $session): array => $this->flatten($session), $row['followups']);
+
+        $line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+
+        if ($this->definition->sortsRowsByReportingDate()) {
+            $this->index[(string) ($row['attributes']['date_of_reporting'] ?? '')][] = $this->spillOffset;
+        }
+
+        $this->spillOffset += strlen($line);
+        $this->buffer[] = $line;
+        $this->rowsWritten++;
+
+        if (count($this->buffer) >= self::BUFFER_ROWS) {
+            $this->flush();
+        }
+    }
+
+    /**
+     * Write the buffered rows out and let go of them.
+     */
+    private function flush(): void
+    {
+        if ($this->buffer === []) {
+            return;
+        }
+
+        if ($this->spillHandle === null) {
+            $this->spillPath = tempnam(sys_get_temp_dir(), 'import-rows-');
+
+            if ($this->spillPath === false) {
+                throw new \RuntimeException('Could not open a temporary file for the import.');
+            }
+
+            $this->spillHandle = fopen($this->spillPath, 'wb');
+
+            if ($this->spillHandle === false) {
+                throw new \RuntimeException('Could not open a temporary file for the import.');
+            }
+        }
+
+        fwrite($this->spillHandle, implode('', $this->buffer));
+
+        // Pushed to the operating system rather than left in PHP's own stream
+        // buffer: the rows are read back through a second handle on the same
+        // file, and a final batch smaller than that buffer would still have
+        // been sitting in it when the reader went looking for it.
+        fflush($this->spillHandle);
+
+        $this->buffer = [];
+    }
+
+    /**
+     * Turn one row's values into something JSON can carry back unchanged.
+     *
+     * @param  array<string, mixed>  $values
+     * @return array<string, mixed>
+     */
+    private function flatten(array $values): array
+    {
+        foreach ($values as $key => $value) {
+            if ($value instanceof \DateTimeInterface) {
+                $values[$key] = $value->format('Y-m-d');
+            }
+        }
+
+        return $values;
     }
 
     /**
@@ -382,13 +597,35 @@ abstract class AbstractTableImport implements ToCollection, WithChunkReading
 
     /**
      * Parse one repeater date cell, reporting it under the column's own heading.
+     *
+     * Read through the same parser as every flat column, and for the same
+     * reason. This method used to hand the cell straight to Carbon::parse(),
+     * which reads a slashed date month-first: a visit typed "03/04/2026" was
+     * stored as the 4th of March while the reporting date in the very same row,
+     * typed identically, was stored as the 3rd of April. Nothing said so.
      */
     private function parseDate(mixed $value, string $label, array &$messages): mixed
     {
+        // A cell that states there is no date. The caller decides what an
+        // absent visit date costs; guessing one here is what must not happen.
+        if (ImportDateParser::statesNoDate($value)) {
+            return null;
+        }
+
         try {
-            return is_numeric($value)
-                ? \Carbon\Carbon::instance(\PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $value))->startOfDay()
-                : \Carbon\Carbon::parse((string) $value)->startOfDay();
+            if (is_numeric($value)) {
+                return \Carbon\Carbon::instance(
+                    \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $value),
+                )->startOfDay();
+            }
+
+            $iso = ImportDateParser::toIsoDate($value);
+
+            if ($iso === null) {
+                throw new \InvalidArgumentException('Unreadable date cell.');
+            }
+
+            return \Carbon\Carbon::parse($iso)->startOfDay();
         } catch (\Throwable) {
             $messages[] = __('fields.import_invalid_date', ['field' => $label]);
 

@@ -20,26 +20,17 @@ namespace App\Support\Import;
  *     are written day-first, so the row imports with the wrong date and nothing
  *     says so.
  *
- * So every date column of this module is read here first, and by shape rather
- * than by guesswork: the whole cell must match one anchored pattern, and each
- * pattern admits exactly one format. A match becomes an unambiguous Y-m-d
- * string that the existing date rule then reads the same way it always did.
- * Nothing is rounded, rolled over or guessed at - "31/4/2025" stays refused,
- * because April has no 31st, and so does any cell holding something that is not
- * a date.
+ * The reading itself is not done here. Every date cell in the system - flat
+ * columns, repeater columns, every module - goes through {@see ImportDateParser},
+ * which holds the one shape table there is. This class used to carry a copy of
+ * that table, and PregnantWomanImportDates carried an identical second one,
+ * while four modules had none at all and fell through to Carbon's month-first
+ * reading. One workbook could hold both readings at once, which is why the
+ * table now lives in exactly one place.
  *
- * A leading one or two digit group is always the day, never the month. That is
- * the reading these workbooks are written in, and it is the whole point of
- * doing this by shape: the alternative is not "no interpretation", it is PHP's
- * American default applied silently.
- *
- * The shape table is deliberately this module's own rather than shared with
- * PregnantWomanImportDates: each module's reader is free to describe its own
- * workbooks, and the module that was already fixed is not touched to add this
- * one.
- *
- * Which columns may lose a cell rather than fail their row is decided in
- * DROPPABLE below, and only mother_date_of_birth is on that list.
+ * What is left here is the only thing that genuinely is this module's own: which
+ * of its columns may lose an unreadable cell rather than fail its row. That is
+ * decided in DROPPABLE below, and only mother_date_of_birth is on that list.
  */
 final class ChildImportDates
 {
@@ -64,48 +55,6 @@ final class ChildImportDates
      * @var array<int, string>
      */
     private const DROPPABLE = ['mother_date_of_birth'];
-
-    /**
-     * shape the whole cell must match => the one format that reads it.
-     *
-     * Each shape is anchored and admits exactly one format, so there is no
-     * ordering hazard and no format can steal a value meant for another. A
-     * four-digit leading group is always the year; a one or two digit leading
-     * group is always the day. Where a month name is present it settles which
-     * component is the month on its own, so both orderings are safe to accept.
-     *
-     * PHP's "M" reads "Aug", "August" and "AUG" alike, and refuses a word that
-     * is not a month at all.
-     *
-     * @var array<string, string>
-     */
-    private const SHAPES = [
-        // Year first.
-        '/^\d{4}-\d{1,2}-\d{1,2}$/' => 'Y-m-d',
-        '/^\d{4}\/\d{1,2}\/\d{1,2}$/' => 'Y/m/d',
-        '/^\d{4}\.\d{1,2}\.\d{1,2}$/' => 'Y.m.d',
-
-        // Day first, four digit year.
-        '/^\d{1,2}\/\d{1,2}\/\d{4}$/' => 'd/m/Y',
-        '/^\d{1,2}-\d{1,2}-\d{4}$/' => 'd-m-Y',
-        '/^\d{1,2}\.\d{1,2}\.\d{4}$/' => 'd.m.Y',
-
-        // Day first, two digit year.
-        '/^\d{1,2}\/\d{1,2}\/\d{2}$/' => 'd/m/y',
-        '/^\d{1,2}-\d{1,2}-\d{2}$/' => 'd-m-y',
-        '/^\d{1,2}\.\d{1,2}\.\d{2}$/' => 'd.m.y',
-
-        // Month named, month first.
-        '/^[A-Za-z]{3,9}\/\d{1,2}\/\d{4}$/' => 'M/d/Y',
-        '/^[A-Za-z]{3,9}-\d{1,2}-\d{4}$/' => 'M-d-Y',
-        '/^[A-Za-z]{3,9} \d{1,2} \d{4}$/' => 'M d Y',
-        '/^[A-Za-z]{3,9} \d{1,2}, \d{4}$/' => 'M d, Y',
-
-        // Month named, day first.
-        '/^\d{1,2}\/[A-Za-z]{3,9}\/\d{4}$/' => 'd/M/Y',
-        '/^\d{1,2}-[A-Za-z]{3,9}-\d{4}$/' => 'd-M-Y',
-        '/^\d{1,2} [A-Za-z]{3,9} \d{4}$/' => 'd M Y',
-    ];
 
     public static function handles(string $field): bool
     {
@@ -140,35 +89,13 @@ final class ChildImportDates
             return $value;
         }
 
-        // A backslash is never a date separator, only a mistyped slash.
-        $candidate = str_replace('\\', '/', trim($value));
-
-        if ($candidate === '') {
+        // A blank cell is never touched: whether it is allowed is the
+        // required-field rule's decision, not this class's.
+        if (trim($value) === '') {
             return $value;
         }
 
-        foreach (self::SHAPES as $shape => $format) {
-            if (! preg_match($shape, $candidate)) {
-                continue;
-            }
-
-            $date = \DateTimeImmutable::createFromFormat('!' . $format, $candidate);
-            $errors = \DateTimeImmutable::getLastErrors();
-
-            // A warning here is PHP having rolled an impossible date over into
-            // the next month - the 31st of April becoming the 1st of May. The
-            // file says a day that does not exist, so there is no date to keep.
-            $rolledOver = $errors !== false
-                && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
-
-            if ($date === false || $rolledOver) {
-                return self::unreadable($field, $value);
-            }
-
-            return $date->format('Y-m-d');
-        }
-
-        return self::unreadable($field, $value);
+        return ImportDateParser::toIsoDate($value) ?? self::unreadable($field, $value);
     }
 
     /**

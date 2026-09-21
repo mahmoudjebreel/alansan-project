@@ -372,6 +372,13 @@ return [
     'import_invalid_date' => 'Invalid date for :field.',
     'import_invalid_number' => 'Invalid value ":value" for :field — must be a number.',
     'import_too_many_sessions' => 'The file carries follow-up session :n, but a record may hold at most :max sessions. Remove the extra session columns and upload again.',
+    'import_duplicate_visit' => 'This visit already exists.',
+    'import_duplicate_session' => 'This session already exists.',
+    'import_duplicate_counseling' => 'A counseling record already exists for this mother on this date.',
+    'import_duplicate_follow_up_visit' => 'Visit :n on :date already exists for this child.',
+    'import_skipped_heading' => ':count row(s) were already in the system and were not imported again:',
+    'discharge_date_required_for_outcome' => 'Discharge Date is required when the outcome is ":outcome". Only "Under Follow-up" leaves the case open.',
+    'discharge_date_before_admission' => 'Discharge Date (:discharge) cannot be earlier than the Admission Date (:admission).',
     'import_example_row' => 'Example row — delete this line before uploading',
 
     // MEAL monthly monitoring report

@@ -374,6 +374,13 @@ return [
     'import_invalid_date' => 'تاريخ غير صالح للحقل :field.',
     'import_invalid_number' => 'القيمة ":value" غير صالحة للحقل :field — يجب أن تكون رقماً.',
     'import_too_many_sessions' => 'يحتوي الملف على جلسة المتابعة رقم :n، بينما الحد الأقصى المسموح به لكل سجل هو :max جلسات. يرجى حذف أعمدة الجلسات الزائدة ثم إعادة الرفع.',
+    'import_duplicate_visit' => 'هذه الزيارة موجودة بالفعل.',
+    'import_duplicate_session' => 'هذه الجلسة موجودة بالفعل.',
+    'import_duplicate_counseling' => 'يوجد سجل إرشاد لهذه الأم بنفس التاريخ.',
+    'import_duplicate_follow_up_visit' => 'الزيارة رقم :n بتاريخ :date موجودة بالفعل لهذا الطفل.',
+    'import_skipped_heading' => ':count صف موجود مسبقاً في النظام ولم يُستورد مرة أخرى:',
+    'discharge_date_required_for_outcome' => 'تاريخ التخريج مطلوب عندما تكون الحالة ":outcome". الحالة الوحيدة التي تبقى مفتوحة هي "تحت المتابعة".',
+    'discharge_date_before_admission' => 'لا يمكن أن يكون تاريخ التخريج (:discharge) قبل تاريخ القبول (:admission).',
     'import_example_row' => 'صف تجريبي — احذف هذا السطر قبل الرفع',
 
     // MEAL monthly monitoring report

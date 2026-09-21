@@ -8,6 +8,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Collection;
+use App\Support\Import\ImportDateParser;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 /**
@@ -530,13 +531,25 @@ final class ImportSchema
             }
         }
 
-        // A module may read its own hand-typed date cells first. Excel serials
-        // never reach it: the branch below already turns those into dates
-        // correctly, and there is nothing ambiguous about a number.
+        // Every typed date cell is read by shape before anything else looks at
+        // it. Excel serials never get here: the branch below already turns
+        // those into dates correctly, and there is nothing ambiguous about a
+        // number.
+        //
+        // A module that names a dateReader gets its own one, and the only thing
+        // that reader decides is whether an unreadable cell costs the cell or
+        // the whole row - the shapes it reads by are the shared ones. A module
+        // that names none reads through the shared parser directly, which is
+        // what four of the six used to do without: they fell through to
+        // Carbon::parse() and got its month-first reading, so "03/04/2026"
+        // imported as the 4th of March in those modules and as the 3rd of April
+        // in the two that had a reader.
         $reader = $this->definition->dateReader;
 
-        if ($reader !== null && ! is_numeric($value)) {
-            $value = $reader::normalise($field, $value);
+        if (! is_numeric($value)) {
+            $value = $reader !== null
+                ? $reader::normalise($field, $value)
+                : ImportDateParser::normalise($value);
 
             // The reader dropped an unreadable cell in a column where that
             // costs the cell rather than the whole row.
@@ -620,76 +633,25 @@ final class ImportSchema
     }
 
     /**
-     * Whether a cell says nothing at all.
+     * Whether a cell says nothing at all - blank once every kind of invisible
+     * character is removed, or nothing but placeholder punctuation ("-", "/").
      *
-     * True for a cell that is empty once every kind of blank is removed, and
-     * for one holding only punctuation used as a placeholder - "-", "--", "/".
-     * PHP's trim() stops at the ASCII space, so a non-breaking space, a
-     * zero-width joiner or a stray BOM used to survive it and be read as a
-     * value; \p{Z} and \p{C} cover all three.
-     *
-     * A cell carrying any letter or digit is never a placeholder, so a real
-     * answer can never be discarded here.
+     * Shared with the date reader on purpose: "this cell is empty" has to mean
+     * the same thing in a Yes/No column as it does in a date column.
      */
     private function isPlaceholder(mixed $value): bool
     {
-        if (! is_string($value)) {
-            return false;
-        }
-
-        $stripped = preg_replace('/[\p{Z}\p{C}]/u', '', $value) ?? $value;
-
-        return $stripped === '' || preg_match('/[\p{L}\p{N}]/u', $stripped) !== 1;
+        return ImportDateParser::isPlaceholder($value);
     }
 
     /**
-     * Whether a date cell states that there is no date.
-     *
-     * Beyond the blank and placeholder shapes isPlaceholder() covers, two
-     * spellings of "none" are specific to date columns:
-     *
-     *   - a serial of zero or less. Excel counts days from serial 1, so a zero
-     *     is not the 30th of December 1899, it is a date column nobody filled
-     *     in;
-     *   - a cell whose digits are all zeros - "0", "00/00/0000", "0000-00-00" -
-     *     which is what a form or an export writes for an absent date;
-     *   - a boolean FALSE, which is how a sheet storing real Excel booleans
-     *     leaves a date column unanswered.
-     *
-     * Anything holding a non-zero digit is left alone and still has to parse,
-     * so a real date can never be dropped here.
+     * Whether a date cell states that there is no date - the placeholder shapes
+     * above plus the ones only a date column writes: a serial of zero or less,
+     * all-zero digits, a boolean FALSE.
      */
     private function statesNoDate(mixed $value): bool
     {
-        if ($this->isPlaceholder($value)) {
-            return true;
-        }
-
-        // A date column whose cells arrived as Excel booleans. FALSE is that
-        // sheet's way of writing "no date", and it used to reach Carbon as the
-        // empty string - which Carbon reads as today, so the row imported with
-        // today's date and said nothing. TRUE is not a date under any reading
-        // and is left to be refused below.
-        if ($value === false) {
-            return true;
-        }
-
-        if (is_numeric($value)) {
-            return (float) $value <= 0;
-        }
-
-        if (! is_string($value)) {
-            return false;
-        }
-
-        // A month name makes the cell a date attempt, not a "none" marker.
-        if (preg_match('/\p{L}/u', $value) === 1) {
-            return false;
-        }
-
-        $digits = preg_replace('/\D/u', '', $value) ?? '';
-
-        return $digits !== '' && trim($digits, '0') === '';
+        return ImportDateParser::statesNoDate($value);
     }
 
     // ---------------------------------------------------------------------
