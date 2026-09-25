@@ -295,7 +295,10 @@ class MealReportTest extends TestCase
 
     public function test_discharge_outcomes_map_onto_the_template_categories(): void
     {
-        foreach (['cured' => 'recovered', 'defaulted' => 'defaulted', 'died' => 'died', 'discharge_to_opt' => 'referred_medical', 'discharge_to_other' => 'other'] as $stored => $expected) {
+        // A transfer to another OTP is a case discharged other, not a
+        // medical referral; only the inpatient referral is one (and the SC
+        // referral count).
+        foreach (['cured', 'defaulted', 'died', 'referred_medical_inpt', 'discharge_to_opt', 'discharge_to_other'] as $stored) {
             $this->followUpChild([
                 'admitted_with' => 'SAM', 'sex' => 'M', 'age' => 12,
                 'admission_date' => '2026-07-01', 'discharge_date' => '2026-07-05', 'discharge_outcome' => $stored,
@@ -304,8 +307,8 @@ class MealReportTest extends TestCase
 
         $totals = $this->totals(MealReportLayout::SHEET_CMAM);
 
-        foreach (['recovered', 'defaulted', 'died', 'referred_medical', 'other'] as $outcome) {
-            $this->assertSame(1, $totals["sam_dis_{$outcome}_6_23_male"], "Outcome [{$outcome}] was not counted.");
+        foreach (['recovered' => 1, 'defaulted' => 1, 'died' => 1, 'referred_medical' => 1, 'other' => 2] as $outcome => $count) {
+            $this->assertSame($count, $totals["sam_dis_{$outcome}_6_23_male"], "Outcome [{$outcome}] was not counted.");
         }
 
         $this->assertSame(1, $totals['sam_referred_6_23_male']);
