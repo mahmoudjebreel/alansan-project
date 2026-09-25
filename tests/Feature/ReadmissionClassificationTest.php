@@ -183,12 +183,12 @@ class ReadmissionClassificationTest extends TestCase
     // 3-4. After relapse: cured SAM/MAM, then SAM/MAM again
     // =================================================================
 
-    public function test_a_sam_child_cured_and_screened_sam_again_is_a_relapse(): void
+    public function test_a_sam_child_cured_and_screened_sam_again_is_a_readmission_after_relapse(): void
     {
         $this->assertRelapse('SAM', 110);
     }
 
-    public function test_a_mam_child_cured_and_screened_mam_again_is_a_relapse(): void
+    public function test_a_mam_child_cured_and_screened_mam_again_is_a_readmission_after_relapse(): void
     {
         $this->assertRelapse('MAM', 118);
     }
@@ -201,8 +201,9 @@ class ReadmissionClassificationTest extends TestCase
         $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $cured->classifiesReturnAs());
         $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, FollowUpChild::readmissionClassificationFor(self::CHILD_ID));
 
-        // Cured is not a readmission: no button, and the transfer behind
-        // the button refuses. The relapse is raised from the screening.
+        // Cured offers no readmission button, and the transfer behind the
+        // button refuses: a readmission after relapse is raised from the
+        // screening.
         $this->assertFalse($cured->canBeReadmitted());
         $this->assertNull(ChildFollowUpTransfer::readmitFromEpisode($cured, $this->readmissionData($muac)));
 
@@ -212,8 +213,8 @@ class ReadmissionClassificationTest extends TestCase
         $new = ChildFollowUpTransfer::refer($this->screening($muac));
 
         $this->assertNotNull($new);
-        $this->assertFalse($new->isReadmission(), 'A relapse is a new admission, not a readmission.');
-        $this->assertSame(FollowUpChild::ADMISSION_NEW, $new->admissionType());
+        $this->assertTrue($new->isReadmission(), 'A return after a cure is a readmission after relapse.');
+        $this->assertSame(FollowUpChild::ADMISSION_READMISSION, $new->derivedAdmissionType());
         $this->assertSame($programme, $new->admitted_with);
         $this->assertSame($cured->getKey(), $new->previous_follow_up_child_id);
         $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $new->readmissionClassification());
@@ -294,13 +295,12 @@ class ReadmissionClassificationTest extends TestCase
         Livewire::test(ViewFollowUpChild::class, ['record' => $previous->getKey()])
             ->assertActionHidden('readmission');
 
-        // Whatever opens after it is not a readmission and follows nothing.
-        $new = ChildFollowUpTransfer::refer(Child::where('child_id', self::CHILD_ID)->sole());
-
-        $this->assertNotNull($new);
-        $this->assertFalse($new->isReadmission());
-        $this->assertNull($new->previous_follow_up_child_id);
-        $this->assertNull($new->readmissionClassification());
+        // Died is final: nothing opens after it - not a new admission, not a
+        // readmission, not a relapse - and the died episode is untouched.
+        $this->assertTrue(FollowUpChild::isTerminal(self::CHILD_ID));
+        $this->assertNull(ChildFollowUpTransfer::refer(Child::where('child_id', self::CHILD_ID)->sole()));
+        $this->assertSame(1, FollowUpChild::where('id_number', self::CHILD_ID)->count());
+        $this->assertSame('died', $previous->fresh()->discharge_outcome);
     }
 
     // =================================================================
@@ -371,7 +371,7 @@ class ReadmissionClassificationTest extends TestCase
         $cases = [
             ['defaulted', '480000020', __('fields.readmission_after_defaulted'), __('ui.readmission.reasons.defaulted')],
             ['discharge_to_other', '480000021', __('fields.readmission_after_other'), __('ui.readmission.reasons.other')],
-            ['cured', '480000022', __('fields.readmission_after_relapse'), __('ui.readmission.reasons.relapse')],
+            ['cured', '480000022', __('fields.readmission_after_relapse'), __('ui.readmission.reasons.readmission_after_relapse')],
             ['non_responded', '480000023', null, null],
         ];
 

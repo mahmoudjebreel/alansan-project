@@ -50,7 +50,9 @@ class MealCmamReportTest extends TestCase
         'died' => 'died',
         'non_responded' => 'no_response',
         'referred_medical_inpt' => 'referred_medical',
-        'discharge_to_opt' => 'referred_medical',
+        // A transfer to another OTP is a discharge to somewhere else, not a
+        // medical referral.
+        'discharge_to_opt' => 'other',
         'discharge_to_other' => 'other',
     ];
 
@@ -84,12 +86,11 @@ class MealCmamReportTest extends TestCase
         $this->assertSame(0, $totals['sam_adm_6_23_new_male']);
     }
 
-    public function test_mam_relapse_admission_is_a_new_episode_after_an_earlier_episode(): void
+    public function test_mam_return_after_a_cure_is_counted_under_readmission(): void
     {
-        // First episode, cured in June. A cure does not allow a readmission,
-        // so when the child came back in August the module opened an
-        // ordinary new episode - which, for a child with a closed episode on
-        // file, the report counts as a relapse.
+        // First episode, cured in June; the child is back at MAM in August
+        // on a row with no link: a readmission after relapse, which the
+        // report counts under Readmission. Relapse admission stays empty.
         $this->episode([
             'id_number' => '500000001', 'admitted_with' => 'MAM', 'sex' => 'M', 'dob' => '2025-08-05',
             'admission_date' => '2026-06-01', 'discharge_date' => '2026-06-29', 'discharge_outcome' => 'cured',
@@ -101,9 +102,9 @@ class MealCmamReportTest extends TestCase
 
         $totals = $this->totals(self::AUGUST, self::AUGUST);
 
-        $this->assertSame(1, $totals['mam_adm_6_23_relapse_male']);
+        $this->assertSame(0, $totals['mam_adm_6_23_relapse_male']);
         $this->assertSame(0, $totals['mam_adm_6_23_new_male']);
-        $this->assertSame(0, $totals['mam_adm_6_23_readmission_male']);
+        $this->assertSame(1, $totals['mam_adm_6_23_readmission_male']);
     }
 
     public function test_a_first_episode_is_new_even_when_the_admission_type_is_blank(): void
@@ -156,8 +157,8 @@ class MealCmamReportTest extends TestCase
     }
 
     // =================================================================
-    // Readmission classification: after defaulted and after other land in
-    // Readmission, after relapse in Relapse admission, and never in New.
+    // Readmission classification: after defaulted, after other and after
+    // relapse all land in Readmission - never in Relapse admission or New.
     // Each of these is a two-episode child: the original episode keeps its
     // own admission and discharge, the returned one is its own admission.
     // =================================================================
@@ -215,12 +216,12 @@ class MealCmamReportTest extends TestCase
         $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'));
     }
 
-    public function test_a_relapse_after_a_cured_sam_episode_is_counted_under_relapse_not_new(): void
+    public function test_a_return_after_a_cured_sam_episode_is_counted_under_readmission(): void
     {
         $this->assertRelapseCounted('SAM', 110, '500000012');
     }
 
-    public function test_a_relapse_after_a_cured_mam_episode_is_counted_under_relapse_not_new(): void
+    public function test_a_return_after_a_cured_mam_episode_is_counted_under_readmission(): void
     {
         $this->assertRelapseCounted('MAM', 118, '500000013');
     }
@@ -376,9 +377,10 @@ class MealCmamReportTest extends TestCase
 
     public function test_the_three_returns_land_in_one_column_each_and_no_episode_is_counted_twice(): void
     {
-        // One child of each kind, all returning in September: two
-        // readmissions, one relapse, and their three originals as New in
-        // August. Six episodes, six admissions, one column each.
+        // One child of each kind, all returning in September: after a
+        // default, after an other exit and after relapse - all three
+        // Readmission - and their three originals as New in August. Six
+        // episodes, six admissions, one column each.
         Carbon::setTestNow('2026-09-05');
 
         $defaulted = $this->closedEpisode('SAM', 'defaulted', '500000020');
@@ -396,8 +398,8 @@ class MealCmamReportTest extends TestCase
         $september = $sheet['monthTotals'][self::SEPTEMBER];
 
         $this->assertSame(3, $august['sam_adm_6_23_new_male']);
-        $this->assertSame(2, $september['sam_adm_6_23_readmission_male']);
-        $this->assertSame(1, $september['sam_adm_6_23_relapse_male']);
+        $this->assertSame(3, $september['sam_adm_6_23_readmission_male']);
+        $this->assertSame(0, $september['sam_adm_6_23_relapse_male']);
         $this->assertSame(0, $september['sam_adm_6_23_new_male']);
 
         $this->assertSame(6, $this->sum($sheet['totals'], '_adm_'), 'Six episodes, six admissions, no more.');
@@ -419,7 +421,7 @@ class MealCmamReportTest extends TestCase
         $this->assertSame(0, $totals['mam_adm_6_23_new_female']);
     }
 
-    public function test_sam_relapse_admission_is_a_new_episode_after_an_earlier_episode(): void
+    public function test_sam_return_after_a_cure_is_counted_under_readmission(): void
     {
         $this->episode([
             'id_number' => '500000004', 'admitted_with' => 'SAM', 'sex' => 'F', 'dob' => '2024-01-05',
@@ -432,9 +434,9 @@ class MealCmamReportTest extends TestCase
 
         $totals = $this->totals(self::AUGUST, self::AUGUST);
 
-        $this->assertSame(1, $totals['sam_adm_24_59_relapse_female']);
+        $this->assertSame(0, $totals['sam_adm_24_59_relapse_female']);
         $this->assertSame(0, $totals['sam_adm_24_59_new_female']);
-        $this->assertSame(0, $totals['sam_adm_24_59_readmission_female']);
+        $this->assertSame(1, $totals['sam_adm_24_59_readmission_female']);
     }
 
     public function test_sam_readmission_is_counted_under_readmission(): void
@@ -707,6 +709,8 @@ class MealCmamReportTest extends TestCase
     public function test_sam_cases_referred_to_sc_come_from_the_inpatient_medical_referral_outcome(): void
     {
         $this->episode(['admitted_with' => 'SAM', 'sex' => 'M', 'age' => 12, 'admission_date' => '2026-08-01', 'discharge_date' => '2026-08-09', 'discharge_outcome' => 'referred_medical_inpt']);
+        // A transfer to another OTP is neither a medical referral nor an SC
+        // referral: it is a case discharged other.
         $this->episode(['admitted_with' => 'SAM', 'sex' => 'F', 'age' => 30, 'admission_date' => '2026-08-01', 'discharge_date' => '2026-08-09', 'discharge_outcome' => 'discharge_to_opt']);
         // A MAM referral is a MAM discharge, never a SAM referral.
         $this->episode(['admitted_with' => 'MAM', 'sex' => 'M', 'age' => 12, 'admission_date' => '2026-08-01', 'discharge_date' => '2026-08-09', 'discharge_outcome' => 'referred_medical_inpt']);
@@ -716,12 +720,14 @@ class MealCmamReportTest extends TestCase
         $totals = $this->totals(self::AUGUST, self::AUGUST);
 
         $this->assertSame(1, $totals['sam_referred_6_23_male']);
-        $this->assertSame(1, $totals['sam_referred_24_59_female']);
+        $this->assertSame(0, $totals['sam_referred_24_59_female']);
         $this->assertSame(0, $totals['sam_referred_6_23_female']);
-        $this->assertSame(2, $this->sum($totals, 'sam_referred_'));
+        $this->assertSame(1, $this->sum($totals, 'sam_referred_'));
 
         $this->assertSame(1, $totals['sam_dis_referred_medical_6_23_male']);
         $this->assertSame(1, $totals['mam_dis_referred_medical_6_23_male']);
+        $this->assertSame(0, $totals['sam_dis_referred_medical_24_59_female']);
+        $this->assertSame(1, $totals['sam_dis_other_24_59_female']);
     }
 
     public function test_caregivers_counselled_has_no_source_and_stays_blank(): void
@@ -1092,10 +1098,10 @@ class MealCmamReportTest extends TestCase
 
     /**
      * A cured SAM/MAM episode in August, then the same child screened at
-     * the programme again in September: the transfer opens a relapse -
-     * a new admission linked to the cured episode - and the report counts
-     * it under Relapse admission, the cure under Recovered, and nothing
-     * twice.
+     * the programme again in September: the transfer opens a readmission
+     * after relapse linked to the cured episode, and the report counts it
+     * under Readmission (never Relapse admission), the cure under
+     * Recovered, and nothing twice.
      */
     private function assertRelapseCounted(string $programme, int $muac, string $idNumber): void
     {
@@ -1108,7 +1114,7 @@ class MealCmamReportTest extends TestCase
         ]));
 
         $this->assertNotNull($relapse);
-        $this->assertFalse($relapse->isReadmission());
+        $this->assertTrue($relapse->isReadmission());
         $this->assertSame($cured->getKey(), $relapse->previous_follow_up_child_id);
         $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $relapse->readmissionClassification());
         $this->assertSame([1], $relapse->visits->pluck('visit_number')->all());
@@ -1121,9 +1127,9 @@ class MealCmamReportTest extends TestCase
         $this->assertSame(1, $august["{$prefix}_adm_6_23_new_male"]);
         $this->assertSame(1, $august["{$prefix}_dis_recovered_6_23_male"]);
 
-        $this->assertSame(1, $september["{$prefix}_adm_6_23_relapse_male"]);
-        $this->assertSame(0, $september["{$prefix}_adm_6_23_new_male"], 'Visit 1 of a relapse is not a New admission.');
-        $this->assertSame(0, $september["{$prefix}_adm_6_23_readmission_male"]);
+        $this->assertSame(0, $september["{$prefix}_adm_6_23_relapse_male"], 'No return is a Relapse admission.');
+        $this->assertSame(0, $september["{$prefix}_adm_6_23_new_male"], 'Visit 1 of a readmission is not a New admission.');
+        $this->assertSame(1, $september["{$prefix}_adm_6_23_readmission_male"]);
 
         $this->assertSame(2, $this->sum($sheet['totals'], '_adm_'), 'Two episodes, two admissions, no more.');
     }

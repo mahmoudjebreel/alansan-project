@@ -69,14 +69,14 @@ class FollowUpChildrenExport extends AbstractTableExport
 
     public function query(): Builder
     {
-        // The linked episode is read even from the trash: the classification
-        // was settled when this episode was opened, exactly as the model's
-        // own readmissionClassification() reads it.
-        // @see \App\Models\FollowUpChild::readmissionClassification()
-        return $this->query->with([
-            'visits',
-            'previousEpisode' => fn ($query) => $query->withTrashed(),
-        ]);
+        // Every row carries its classification and the episode it follows,
+        // selected by the one definition the listing and the MEAL report
+        // read as well.
+        // @see \App\Models\FollowUpChild::scopeWithAdmissionClassification()
+        // A clone, so asking twice does not select the columns twice.
+        return (clone $this->query)
+            ->withAdmissionClassification()
+            ->with(['visits', 'resolvedPreviousEpisode']);
     }
 
     public function headings(): array
@@ -125,8 +125,11 @@ class FollowUpChildrenExport extends AbstractTableExport
     {
         /** @var FollowUpChild $record */
         return match ($field) {
+            // Derived from the history, never the stored value, so the sheet
+            // says what the listing and the MEAL report say.
+            'admission_type' => __('fields.' . $record->derivedAdmissionType()),
             'readmission_classification' => FollowUpChildResource::readmissionClassificationLabel(
-                $this->previousEpisodeOf($record)?->classifiesReturnAs(),
+                $record->readmissionClassification(),
             ),
             'previous_episode_admission_date' => $this->previousEpisodeOf($record)?->admission_date?->format('Y-m-d'),
             'previous_episode_discharge_date' => $this->previousEpisodeOf($record)?->discharge_date?->format('Y-m-d'),
@@ -137,22 +140,30 @@ class FollowUpChildrenExport extends AbstractTableExport
     }
 
     /**
-     * The closed episode this row is linked to, or null for a first admission
-     * and for every row written before the link existed. Read through the
-     * model's own relation, from the trash as well, and never inferred from
-     * the child ID alone.
+     * The closed episode this row follows, as the classification reads it:
+     * the linked one, or for a row written before the link existed the one
+     * the history infers. Null for a first admission.
+     *
+     * @see \App\Models\FollowUpChild::previousEpisodeIdSql()
      */
     private function previousEpisodeOf(FollowUpChild $record): ?FollowUpChild
     {
-        if (blank($record->previous_follow_up_child_id)) {
+        if (! array_key_exists('resolved_previous_episode_id', $record->getAttributes())) {
+            $record = FollowUpChild::withTrashed()
+                ->whereKey($record->getKey())
+                ->withAdmissionClassification()
+                ->first() ?? $record;
+        }
+
+        if (blank($record->getAttribute('resolved_previous_episode_id'))) {
             return null;
         }
 
-        if (! $record->relationLoaded('previousEpisode')) {
-            $record->load(['previousEpisode' => fn ($query) => $query->withTrashed()]);
+        if (! $record->relationLoaded('resolvedPreviousEpisode')) {
+            $record->load('resolvedPreviousEpisode');
         }
 
-        return $record->previousEpisode;
+        return $record->resolvedPreviousEpisode;
     }
 
     private function previousEpisodeOutcome(FollowUpChild $record): ?string

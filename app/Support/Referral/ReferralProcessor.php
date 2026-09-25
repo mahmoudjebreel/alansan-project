@@ -36,10 +36,23 @@ final class ReferralProcessor
     public const OUTCOME_SKIPPED_ACTIVE = 'skipped_active';
 
     /**
-     * Every episode on file is closed. The history stays closed and nothing
-     * is re-opened; a new admission is a decision this screen does not take.
+     * Every episode on file is closed and the latest one ended as a default
+     * or an eligible other exit. That child comes back as a readmission, and
+     * a readmission is opened one child at a time with the Readmission
+     * action, never in bulk. Nothing is re-opened.
+     *
+     * A child whose latest closed episode ended as cured or non-responded is
+     * not skipped: the referral opens a new episode for them, and the
+     * transfer classifies it (a relapse, a readmission after relapse, or a
+     * new admission) exactly as it does for a Children screening.
      */
     public const OUTCOME_SKIPPED_CLOSED = 'skipped_closed';
+
+    /**
+     * The child's latest closed episode ended as died. The history is final
+     * and the child is never admitted again.
+     */
+    public const OUTCOME_SKIPPED_DIED = 'skipped_died';
 
     /** The reading is not one the programme admits on, or there is none. */
     public const OUTCOME_SKIPPED_INELIGIBLE = 'skipped_ineligible';
@@ -51,6 +64,7 @@ final class ReferralProcessor
     public const SKIPPED_OUTCOMES = [
         self::OUTCOME_SKIPPED_ACTIVE,
         self::OUTCOME_SKIPPED_CLOSED,
+        self::OUTCOME_SKIPPED_DIED,
         self::OUTCOME_SKIPPED_INELIGIBLE,
     ];
 
@@ -69,7 +83,7 @@ final class ReferralProcessor
      * left alone"; the three counters beside it say why.
      *
      * @param  iterable<int|string>  $childRecordIds  primary keys of `children`
-     * @return array{referred: int, skipped: int, skipped_active: int, skipped_closed: int, skipped_ineligible: int, failed: int}
+     * @return array{referred: int, skipped: int, skipped_active: int, skipped_closed: int, skipped_died: int, skipped_ineligible: int, failed: int}
      */
     public static function refer(
         iterable $childRecordIds,
@@ -86,6 +100,7 @@ final class ReferralProcessor
             'skipped' => 0,
             'skipped_active' => 0,
             'skipped_closed' => 0,
+            'skipped_died' => 0,
             'skipped_ineligible' => 0,
             'failed' => 0,
         ];
@@ -95,6 +110,10 @@ final class ReferralProcessor
         }
 
         $actor ??= auth()->user();
+
+        // Every child ID whose history ended in a death, read once for the
+        // whole run rather than once per child.
+        $terminal = FollowUpChild::terminalEpisodes();
 
         // Chunked so a "select all" over a very large upload never loads the
         // whole selection into memory at once.
@@ -108,7 +127,7 @@ final class ReferralProcessor
             );
 
             foreach ($children as $child) {
-                $outcome = static::referOne($child, $states, $batch, $actor);
+                $outcome = static::referOne($child, $states, $terminal, $batch, $actor);
 
                 $result[$outcome]++;
 
@@ -135,15 +154,23 @@ final class ReferralProcessor
      * duplicated.
      *
      * @param  array<string, string>  $states  updated in place as episodes open
+     * @param  array<string, mixed>  $terminal  child IDs whose history ended in a death
      */
     private static function referOne(
         Child $child,
         array &$states,
+        array $terminal,
         ?ReferralBatch $batch,
         ?User $actor,
     ): string {
         if (! MuacClassifier::isMalnourished(MuacClassifier::classify($child->muac_mm))) {
             return self::OUTCOME_SKIPPED_INELIGIBLE;
+        }
+
+        if (filled($child->child_id) && isset($terminal[(string) $child->child_id])) {
+            static::logSkipped($child, self::OUTCOME_SKIPPED_DIED, $batch, $actor);
+
+            return self::OUTCOME_SKIPPED_DIED;
         }
 
         $state = filled($child->child_id) ? ($states[$child->child_id] ?? null) : null;
@@ -154,7 +181,14 @@ final class ReferralProcessor
             return self::OUTCOME_SKIPPED_ACTIVE;
         }
 
-        if ($state === ReferralCandidates::STATE_CLOSED) {
+        // A closed history is referred again only when its latest episode
+        // does not call for a readmission: after a default or an eligible
+        // other exit the child is readmitted one at a time with the
+        // Readmission action, exactly as before. The test is the one that
+        // action is offered by, so every closed child has exactly one way
+        // back. How the new episode is classified is the transfer's decision.
+        if ($state === ReferralCandidates::STATE_CLOSED
+            && FollowUpChild::readmittableEpisodeFor($child->child_id) !== null) {
             static::logSkipped($child, self::OUTCOME_SKIPPED_CLOSED, $batch, $actor);
 
             return self::OUTCOME_SKIPPED_CLOSED;
@@ -236,9 +270,11 @@ final class ReferralProcessor
         ?ReferralBatch $batch,
         ?User $actor,
     ): void {
-        $reason = $outcome === self::OUTCOME_SKIPPED_ACTIVE
-            ? 'Referral skipped: the child is already in an active follow-up'
-            : 'Referral skipped: the child has a closed follow-up record';
+        $reason = match ($outcome) {
+            self::OUTCOME_SKIPPED_ACTIVE => 'Referral skipped: the child is already in an active follow-up',
+            self::OUTCOME_SKIPPED_DIED => 'Referral refused: the latest follow-up episode ended with Died',
+            default => 'Referral skipped: the child has a closed follow-up record',
+        };
 
         static::write(
             static fn () => activity('referral')

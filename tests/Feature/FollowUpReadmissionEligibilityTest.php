@@ -27,8 +27,9 @@ use Tests\TestCase;
  * Four outcomes allow one - defaulted, discharge to OTP, discharge to other,
  * referred for a medical reason - and every other closed outcome does not,
  * however closed the record is. Being closed is never the test. A cured
- * SAM/MAM child who deteriorates again is a relapse: a new admission linked
- * to the cured episode, raised from a screening and never from the button.
+ * SAM/MAM child who deteriorates again is a readmission after relapse,
+ * linked to the cured episode, raised from a screening and never from the
+ * button.
  *
  * The rest of the feature is covered by FollowUpReadmissionAndVisitHistoryTest;
  * this file defends the eligibility line and what a readmission leaves behind.
@@ -433,8 +434,8 @@ class FollowUpReadmissionEligibilityTest extends TestCase
 
     public function test_a_screening_after_an_ineligible_closed_episode_is_a_first_admission_not_a_readmission(): void
     {
-        // Cured SAM/MAM: a relapse. Not a readmission, but a new admission
-        // linked to the cured episode so the reports can tell it apart.
+        // Cured SAM/MAM: a readmission after relapse, linked to the cured
+        // episode. It is raised from the screening, never the button.
         $cured = $this->closedEpisode('cured');
         $before = $this->snapshot($cured);
 
@@ -443,8 +444,8 @@ class FollowUpReadmissionEligibilityTest extends TestCase
         $episode = ChildFollowUpTransfer::refer($child);
 
         $this->assertNotNull($episode);
-        $this->assertFalse($episode->isReadmission());
-        $this->assertSame(FollowUpChild::ADMISSION_NEW, $episode->admissionType());
+        $this->assertTrue($episode->isReadmission());
+        $this->assertSame(FollowUpChild::ADMISSION_READMISSION, $episode->derivedAdmissionType());
         $this->assertSame($cured->getKey(), $episode->previous_follow_up_child_id);
         $this->assertSame(FollowUpChild::READMISSION_AFTER_RELAPSE, $episode->readmissionClassification());
         $this->assertSame($before, $this->snapshot($cured));

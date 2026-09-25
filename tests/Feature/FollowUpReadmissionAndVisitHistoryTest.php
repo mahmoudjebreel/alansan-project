@@ -783,9 +783,9 @@ class FollowUpReadmissionAndVisitHistoryTest extends TestCase
         $oldRow = $export->map($old->fresh()->load('visits'));
         $newRow = $export->map($new->fresh()->load('visits'));
 
-        // A row written before the column existed exports blank, a
-        // readmission exports as one.
-        $this->assertNull($oldRow[$typeIndex]);
+        // The admission type is derived from the history: a first admission
+        // exports as new whatever was stored, a readmission exports as one.
+        $this->assertSame(__('fields.new'), $oldRow[$typeIndex]);
         $this->assertSame(__('fields.readmission'), $newRow[$typeIndex]);
 
         $base = count($fields);

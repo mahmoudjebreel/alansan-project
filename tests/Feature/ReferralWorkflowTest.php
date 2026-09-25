@@ -194,6 +194,7 @@ class ReferralWorkflowTest extends TestCase
             'skipped' => 0,
             'skipped_active' => 0,
             'skipped_closed' => 0,
+            'skipped_died' => 0,
             'skipped_ineligible' => 0,
             'failed' => 0,
         ], $result);
@@ -254,6 +255,7 @@ class ReferralWorkflowTest extends TestCase
             'skipped' => 1,
             'skipped_active' => 0,
             'skipped_closed' => 0,
+            'skipped_died' => 0,
             'skipped_ineligible' => 1,
             'failed' => 0,
         ], $result);
@@ -653,7 +655,7 @@ class ReferralWorkflowTest extends TestCase
 
         $episode = FollowUpChild::factory()->create([
             'id_number' => 'CASE-CLOSED',
-            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+            'discharge_outcome' => FollowUpChild::DEFAULTED_OUTCOME,
             'discharge_date' => '2026-04-30',
         ]);
 
@@ -670,7 +672,7 @@ class ReferralWorkflowTest extends TestCase
 
         $this->assertSame(1, FollowUpChild::where('id_number', 'CASE-CLOSED')->count());
         $this->assertSame(0, $episode->fresh()->visits()->count());
-        $this->assertSame(FollowUpChild::CURED_OUTCOME, $episode->fresh()->discharge_outcome);
+        $this->assertSame(FollowUpChild::DEFAULTED_OUTCOME, $episode->fresh()->discharge_outcome);
         $this->assertSame('2026-04-30', $episode->fresh()->discharge_date->toDateString());
         $this->assertSame('new', $child->fresh()->visit_type);
     }
@@ -686,7 +688,7 @@ class ReferralWorkflowTest extends TestCase
         $episode = FollowUpChild::factory()->create([
             'id_number' => '470979444',
             'child_name' => 'A completely different spelling',
-            'discharge_outcome' => 'non_responded',
+            'discharge_outcome' => FollowUpChild::DEFAULTED_OUTCOME,
         ]);
 
         foreach (range(1, 8) as $number) {
@@ -738,7 +740,7 @@ class ReferralWorkflowTest extends TestCase
         $selection[] = $this->child(114, ['child_id' => 'BULK-CLOSED-1'])->id;
         FollowUpChild::factory()->create([
             'id_number' => 'BULK-CLOSED-1',
-            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+            'discharge_outcome' => FollowUpChild::DEFAULTED_OUTCOME,
         ]);
 
         $before = FollowUpChild::count();
@@ -785,7 +787,7 @@ class ReferralWorkflowTest extends TestCase
         ]);
         FollowUpChild::factory()->create([
             'id_number' => 'TWICE-CLOSED',
-            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+            'discharge_outcome' => FollowUpChild::DEFAULTED_OUTCOME,
         ]);
 
         ReferralProcessor::refer($selection);
@@ -964,7 +966,7 @@ class ReferralWorkflowTest extends TestCase
         $closed = $this->child(110, ['child_id' => 'AUDIT-CLOSED']);
         FollowUpChild::factory()->create([
             'id_number' => 'AUDIT-CLOSED',
-            'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
+            'discharge_outcome' => FollowUpChild::DEFAULTED_OUTCOME,
         ]);
 
         ReferralProcessor::refer([$active->id, $closed->id], null, $user);

@@ -105,7 +105,9 @@ class FollowUpChildrenExportTest extends TestCase
         $original = $this->row($headings, $rows, $previous);
         $returned = $this->row($headings, $rows, $readmission);
 
-        $this->assertSame('', $original[$type]);
+        // The admission type is derived from the history: a first admission
+        // is new whatever was stored, so the column is never blank.
+        $this->assertSame(__('fields.new'), $original[$type]);
         $this->assertSame(__('fields.defaulted'), $original[$outcome]);
         $this->assertSame(__('fields.readmission'), $returned[$type]);
         $this->assertSame(__('fields.under_follow_up'), $returned[$outcome]);
@@ -180,17 +182,18 @@ class FollowUpChildrenExportTest extends TestCase
         $this->assertSame(__('fields.cured'), $returned[$this->column($headings, 'previous_episode_outcome')]);
     }
 
-    public function test_the_classification_is_never_inferred_from_the_child_id_alone(): void
+    public function test_an_unlinked_episode_is_classified_from_the_history_it_follows(): void
     {
         // Two episodes for one child with no link between them: a row written
-        // before the link existed. The export says nothing it does not know.
+        // before the link existed. It follows the latest closed episode
+        // admitted before it, exactly as the listing and MEAL read it.
         $this->episode([
             'id_number' => '600000040', 'admission_date' => '2026-05-01',
             'discharge_date' => '2026-05-20', 'discharge_outcome' => 'defaulted',
         ]);
         $unlinked = $this->episode([
             'id_number' => '600000040', 'admission_date' => '2026-09-01',
-            'admission_type' => FollowUpChild::ADMISSION_READMISSION,
+            'admission_type' => FollowUpChild::ADMISSION_NEW,
         ]);
 
         [$headings, $rows] = $this->csv(FollowUpChild::query());
@@ -198,9 +201,26 @@ class FollowUpChildrenExportTest extends TestCase
         $row = $this->row($headings, $rows, $unlinked);
 
         $this->assertSame(__('fields.readmission'), $row[$this->column($headings, 'admission_type')]);
+        $this->assertSame(__('fields.readmission_after_defaulted'), $row[$this->column($headings, 'readmission_classification')]);
+        $this->assertSame('2026-05-01', $row[$this->column($headings, 'previous_episode_admission_date')]);
+        $this->assertSame(__('fields.defaulted'), $row[$this->column($headings, 'previous_episode_outcome')]);
+    }
+
+    public function test_a_stored_admission_type_never_overrides_the_history(): void
+    {
+        // An imported "Readmission" with nothing before it is a new admission.
+        $alone = $this->episode([
+            'id_number' => '600000041', 'admission_date' => '2026-09-01',
+            'admission_type' => FollowUpChild::ADMISSION_READMISSION,
+        ]);
+
+        [$headings, $rows] = $this->csv(FollowUpChild::query());
+
+        $row = $this->row($headings, $rows, $alone);
+
+        $this->assertSame(__('fields.new'), $row[$this->column($headings, 'admission_type')]);
         $this->assertSame('', $row[$this->column($headings, 'readmission_classification')]);
         $this->assertSame('', $row[$this->column($headings, 'previous_episode_admission_date')]);
-        $this->assertSame('', $row[$this->column($headings, 'previous_episode_outcome')]);
     }
 
     public function test_a_previous_episode_that_ended_as_died_or_non_responded_classifies_nothing(): void
@@ -355,9 +375,12 @@ class FollowUpChildrenExportTest extends TestCase
 
     public function test_the_existing_enum_labels_are_unchanged(): void
     {
+        // A readmission is one because of the defaulted episode it follows.
+        $previous = $this->closedEpisode('SAM', 'defaulted', '600000082');
         $episode = $this->episode([
             'id_number' => '600000082', 'sex' => 'F', 'admission_type' => FollowUpChild::ADMISSION_READMISSION,
-            'discharge_date' => '2026-06-20', 'discharge_outcome' => 'referred_medical_inpt',
+            'admission_date' => '2026-09-01', 'previous_follow_up_child_id' => $previous->getKey(),
+            'discharge_date' => '2026-09-20', 'discharge_outcome' => 'referred_medical_inpt',
         ]);
 
         [$headings, $rows] = $this->csv(FollowUpChild::query());

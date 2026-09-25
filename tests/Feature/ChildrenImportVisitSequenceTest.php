@@ -130,6 +130,36 @@ class ChildrenImportVisitSequenceTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // H3: the child ID decides, not the calendar.
+    // -----------------------------------------------------------------
+
+    public function test_an_older_visit_uploaded_later_for_an_existing_child_is_a_follow_up(): void
+    {
+        // Already on file: ID 405060708 on 10/08 (new) and 20/08 (follow-up).
+        $this->import($this->sheet([
+            ['2026-08-10', __('fields.new'), 130],
+            ['2026-08-20', __('fields.follow_up'), 131],
+        ]));
+
+        $this->assertSame(['2026-08-10' => 'new', '2026-08-20' => 'follow_up'], $this->storedVisits());
+
+        // Later, an old sheet brings a visit dated 05/08 - earlier than both.
+        // The ID exists, so the visit is a follow-up, even though its date
+        // is the earliest; and the visits already stored are not touched.
+        $result = $this->import($this->sheet([
+            ['2026-08-05', __('fields.new'), 130],
+        ]));
+
+        $this->assertSame([], $result['errors']);
+        $this->assertSame(1, $result['imported']);
+        $this->assertSame([
+            '2026-08-05' => 'follow_up',
+            '2026-08-10' => 'new',
+            '2026-08-20' => 'follow_up',
+        ], $this->storedVisits());
+    }
+
+    // -----------------------------------------------------------------
     // Test case 1: a correct sheet keeps its second visit a follow-up.
     // -----------------------------------------------------------------
 

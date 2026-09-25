@@ -209,6 +209,7 @@ return [
         'skipped' => ':count were skipped (already under follow-up, or no longer SAM/MAM).',
         'skipped_active' => ':count already have an active follow-up and were left alone.',
         'skipped_closed' => ':count have a closed follow-up record and were left alone.',
+        'skipped_died' => ':count cannot be referred because their latest Follow-Up episode ended with Died.',
         'skipped_ineligible' => ':count are no longer SAM or MAM and were left alone.',
         'failed' => ':count could not be referred and were left for a retry.',
         'nothing_selected' => 'No children were selected.',
@@ -281,8 +282,20 @@ return [
         'reasons' => [
             'defaulted' => 'The previous Follow-Up episode ended as Defaulter.',
             'other' => 'The previous eligible Follow-Up episode ended through the Other pathway.',
-            'relapse' => 'The child previously completed a SAM/MAM episode with Cured outcome and later returned as SAM/MAM.',
+            'readmission_after_relapse' => 'The child previously completed a SAM/MAM episode with Cured outcome and later returned as SAM/MAM.',
         ],
+    ],
+
+    'died_terminal' => [
+        'message' => 'Child cannot be registered again because the latest Follow-Up episode ended with Died.',
+        'follow_up_refused' => 'Follow-Up not opened',
+    ],
+
+    'csv_export' => [
+        'failed_title' => 'Export not completed',
+        'incomplete' => 'The export was stopped because it could not be completed: :expected rows were expected and :written were written. No file was sent. Please try again.',
+        'corrupt' => 'The export request could not be read back intact. No file was sent. Please export again.',
+        'unwritable' => 'The export file could not be written on the server. No file was sent. Please try again.',
     ],
 
     // -----------------------------------------------------------------

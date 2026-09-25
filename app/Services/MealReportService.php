@@ -406,7 +406,7 @@ class MealReportService
                 continue;
             }
 
-            // New, relapse or readmission - see cmamAdmissionKindExpression().
+            // New or readmission - see cmamAdmissionKindExpression().
             $kind = $row->admission_kind;
 
             // The template keeps SAM with oedema apart from the other SAM
@@ -454,7 +454,9 @@ class MealReportService
                 'cured' => 'recovered',
                 'defaulted' => 'defaulted',
                 'died' => 'died',
-                'discharge_to_opt' => 'referred_medical',
+                // A transfer to another OTP leaves this programme without a
+                // medical reason: it is a discharge to somewhere else.
+                'discharge_to_opt' => 'other',
                 'discharge_to_other' => 'other',
                 // The two outcomes that used to be stored as
                 // 'discharge_to_other'; each lands in the template column
@@ -473,9 +475,9 @@ class MealReportService
 
             $this->add($buckets, $dischargedOn, "{$programme}_dis_{$outcome}_{$band}_{$sex}", $count);
 
-            // A SAM case referred out of the programme: to inpatient care
-            // for a medical reason, or to another OTP.
-            if ($programme === 'sam' && in_array($row->discharge_outcome, ['referred_medical_inpt', 'discharge_to_opt'], true)) {
+            // A SAM case referred out of the programme to inpatient care for
+            // a medical reason. A transfer to another OTP is not one.
+            if ($programme === 'sam' && $row->discharge_outcome === 'referred_medical_inpt') {
                 $this->add($buckets, $dischargedOn, "sam_referred_{$band}_{$sex}", $count);
             }
 
@@ -493,75 +495,41 @@ class MealReportService
     }
 
     /**
-     * How an admission is reported: 'new', 'relapse' or 'readmission'.
+     * How an admission is reported: 'new' or 'readmission'.
      *
-     * The template has three admission columns and the module has three
-     * readmission classifications, mapped as follows:
+     * The classification comes from the one definition the Follow Up
+     * screens, filters and export read as well, so no episode is counted
+     * here as anything the module does not call it:
      *
      *   readmission after defaulted   -> Readmission
      *   readmission after other       -> Readmission
-     *   readmission after relapse     -> Relapse admission
+     *   readmission after relapse     -> Readmission
      *   everything else               -> New
      *
-     * Readmission is what the episode says it is: admission_type is written
-     * by the readmission workflow and nowhere else, and only after a default
-     * or an eligible other exit. A relapse is an episode linked, through
-     * previous_follow_up_child_id, to a SAM/MAM episode closed as cured -
-     * the link the transfer writes when it opens the episode. The linked
-     * episode is read even from the trash: the classification was settled
-     * when the episode was opened.
+     * The template's Relapse admission column stays in the layout, unchanged,
+     * and no return is counted in it: a return after a cure is a readmission
+     * after relapse, and is counted with the readmissions.
      *
-     * An unlinked episode was written before the link existed, so its
-     * classification is read the way the module would have decided it: the
-     * latest closed non-trashed episode admitted before it, if that one is a
-     * SAM/MAM episode closed as cured, makes it a relapse. A latest closed
-     * episode with any other outcome - non-responded, died, cured with no
-     * SAM/MAM classification - makes it a new admission, as does having no
-     * earlier episode at all.
+     * The stored admission_type plays no part: an imported value there does
+     * not override the child's history.
      *
      * Each episode is one row and the CASE yields one value, so no episode
      * is ever counted under two admission columns.
      *
-     * Written as one SQL expression so the admissions stay a single grouped
-     * query, whatever the length of the period.
+     * @see \App\Models\FollowUpChild::readmissionClassificationSql()
+     * @see \App\Models\FollowUpChild::admissionCategoryOf()
      */
     private function cmamAdmissionKindExpression(string $table): string
     {
-        $readmission = FollowUpChild::ADMISSION_READMISSION;
-        $cured = FollowUpChild::CURED_OUTCOME;
-        $closing = implode(', ', array_map(
-            static fn (string $outcome): string => "'{$outcome}'",
-            FollowUpChild::CLOSING_OUTCOMES,
-        ));
+        // A simple CASE, so the classification is worked out once per row.
+        $arms = '';
 
-        return "CASE
-            WHEN {$table}.admission_type = '{$readmission}' THEN 'readmission'
-            WHEN {$table}.previous_follow_up_child_id IS NOT NULL AND EXISTS (
-                SELECT 1 FROM {$table} AS previous
-                WHERE previous.id = {$table}.previous_follow_up_child_id
-                  AND previous.discharge_outcome = '{$cured}'
-                  AND previous.admitted_with IN ('SAM', 'MAM')
-            ) THEN 'relapse'
-            WHEN {$table}.previous_follow_up_child_id IS NULL AND EXISTS (
-                SELECT 1 FROM {$table} AS earlier
-                WHERE earlier.id = (
-                    SELECT latest.id FROM {$table} AS latest
-                    WHERE latest.id_number = {$table}.id_number
-                      AND latest.deleted_at IS NULL
-                      AND latest.id <> {$table}.id
-                      AND latest.discharge_outcome IN ({$closing})
-                      AND (
-                          latest.admission_date < {$table}.admission_date
-                          OR (latest.admission_date = {$table}.admission_date AND latest.id < {$table}.id)
-                      )
-                    ORDER BY latest.discharge_date DESC, latest.id DESC
-                    LIMIT 1
-                )
-                  AND earlier.discharge_outcome = '{$cured}'
-                  AND earlier.admitted_with IN ('SAM', 'MAM')
-            ) THEN 'relapse'
-            ELSE 'new'
-        END";
+        foreach (FollowUpChild::READMISSION_KINDS as $kind) {
+            $arms .= " WHEN '{$kind}' THEN '" . FollowUpChild::CATEGORY_READMISSION . "'";
+        }
+
+        return 'CASE ' . FollowUpChild::readmissionClassificationSql($table)
+            . "{$arms} ELSE '" . FollowUpChild::CATEGORY_NEW . "' END";
     }
 
     /**

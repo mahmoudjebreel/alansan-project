@@ -229,6 +229,7 @@ class ReferralStatusAndFollowUpViewsTest extends TestCase
             'skipped' => 1,
             'skipped_active' => 0,
             'skipped_closed' => 0,
+            'skipped_died' => 0,
             'skipped_ineligible' => 1,
             'failed' => 0,
         ], $result);

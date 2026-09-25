@@ -14,6 +14,7 @@ use App\Models\FollowUpChild;
 use App\Support\ChildDuplicateChecker;
 use App\Support\ChildFollowUpTransfer;
 use App\Support\FilamentInfolist;
+use App\Support\TerminalChild;
 use App\Support\Forms\BooleanSelectField;
 use Filament\Forms;
 use Filament\Schemas\Schema;
@@ -108,6 +109,23 @@ class ChildResource extends Resource
                     // leading zero. @see \App\Support\Forms\DigitStringField
                     ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
+                    // A child whose history ended in a death is not screened
+                    // again after it. An existing screening keeps its own ID
+                    // and date and may still be corrected.
+                    // @see \App\Support\TerminalChild::refusesScreening()
+                    ->rule(fn (Get $get, ?Child $record): \Closure => function (string $attribute, mixed $value, \Closure $fail) use ($get, $record): void {
+                        $date = $get('date_of_reporting');
+
+                        if ($record?->exists
+                            && (string) $record->child_id === (string) $value
+                            && $record->date_of_reporting?->format('Y-m-d') === (filled($date) ? \Carbon\Carbon::parse($date)->format('Y-m-d') : null)) {
+                            return;
+                        }
+
+                        if (($reason = TerminalChild::refusesScreening($value, $date)) !== null) {
+                            $fail($reason);
+                        }
+                    })
                     ->validationMessages([
                         'required' => __('ui.validation.child_identity_required'),
                         'regex' => __('ui.validation.child_identity_digits'),

@@ -10,7 +10,6 @@ use App\Exports\IndividualCounselingExport;
 use App\Exports\MotherToMotherExport;
 use App\Exports\PregnantWomenExport;
 use App\Models\Child;
-use App\Support\FollowUpDischargeRule;
 use App\Support\Import\ChildImportDates;
 use App\Support\Import\ImportedRowDeriver;
 use App\Support\Import\PregnantWomanImportDates;
@@ -306,6 +305,8 @@ final class ImportDefinition
                 // Visit type and age are decided by the system on the form, so
                 // an uploaded file must not be able to state them either.
                 deriver: [ImportedRowDeriver::class, 'children'],
+                // A child whose history ended in a death is not screened again.
+                rowValidator: [\App\Support\TerminalChild::class, 'forImportedChildRow'],
             ),
             new self(
                 key: 'pregnant',
@@ -1060,7 +1061,8 @@ final class ImportDefinition
                 // the first of those for a while; an upload asked for neither,
                 // so a file could close a hundred episodes with no date on any
                 // of them and the reports would count none of the discharges.
-                rowValidator: [FollowUpDischargeRule::class, 'forImportedRow'],
+                // An episode admitted after a death is refused as well.
+                rowValidator: [\App\Support\TerminalChild::class, 'forImportedFollowUpRow'],
             ),
         ])->keyBy('key')->all();
     }

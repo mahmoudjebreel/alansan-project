@@ -536,7 +536,7 @@ class ReferralCenter extends Page implements HasTable
         // module was not a failed referral, and must not read like one.
         $body = [];
 
-        foreach (['skipped_active', 'skipped_closed', 'skipped_ineligible'] as $reason) {
+        foreach (['skipped_active', 'skipped_closed', 'skipped_died', 'skipped_ineligible'] as $reason) {
             if ($result[$reason] > 0) {
                 $body[] = __('ui.referral_center.' . $reason, ['count' => $result[$reason]]);
             }

@@ -447,17 +447,29 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
         $this->assertSame(1, $summary['pending']);
         $this->assertSame(4, $summary['previously_followed']);
 
-        // Referring everything opens one episode - for the new child only.
+        // Referring everything: the new child, and the children back after a
+        // cure or a non-response, each get a NEW episode that follows the
+        // closed one (the closed one is never re-opened). The child back after
+        // an other exit is left for the one-child Readmission action, and the
+        // child who died is refused.
         $result = ReferralProcessor::refer(array_merge(
             array_map(fn (Child $child): int => $child->getKey(), array_values($children)),
             [$pending->getKey()],
         ));
 
-        $this->assertSame(1, $result['referred']);
-        $this->assertSame(4, $result['skipped_closed']);
+        $this->assertSame(3, $result['referred']);
+        $this->assertSame(1, $result['skipped_closed']);
+        $this->assertSame(1, $result['skipped_died']);
 
-        foreach (array_keys($children) as $id) {
-            $this->assertSame(1, FollowUpChild::where('id_number', $id)->count(), "[{$id}] got a duplicate episode.");
+        $expected = ['470828001' => 2, '470828002' => 2, '470828003' => 1, '470828004' => 1];
+
+        foreach ($expected as $id => $count) {
+            $this->assertSame($count, FollowUpChild::where('id_number', $id)->count(), "[{$id}] has the wrong number of episodes.");
+        }
+
+        // The closed episodes themselves are untouched.
+        foreach ($cases as $case) {
+            $this->assertSame(1, FollowUpChild::where('id_number', $case['id'])->where('discharge_outcome', $case['outcome'])->count());
         }
 
         $this->assertSame(1, FollowUpChild::where('id_number', '470828009')->count());

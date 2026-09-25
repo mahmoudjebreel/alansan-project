@@ -94,6 +94,19 @@ class CreateChild extends CreateRecord
             return;
         }
 
+        // A child whose history ended in a death is never admitted again; the
+        // screening stands (it predates the death, or the form would have
+        // refused it) and the screener is told why nothing was opened.
+        if (MuacClassifier::isMalnourished($child->fi) && FollowUpChild::isTerminal($child->child_id)) {
+            Notification::make()
+                ->title(__('ui.died_terminal.follow_up_refused'))
+                ->body(__('ui.died_terminal.message'))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
         $followUpChild = ChildFollowUpTransfer::refer($child);
 
         if (! $followUpChild instanceof FollowUpChild) {

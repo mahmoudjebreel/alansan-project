@@ -6,6 +6,7 @@ use App\Events\ExcelActionOccurred;
 use App\Support\Activity\AuditEvents;
 use App\Support\Notifications\ActionType;
 use App\Exports\ChildrenExport;
+use App\Exports\CsvExport;
 use App\Exports\PdfExport;
 use App\Filament\Resources\ChildResource;
 use App\Filament\Concerns\HasExcelImport;
@@ -53,7 +54,17 @@ class ListChildren extends ListRecords
         // Announce the export after the fact; it cannot affect the download.
         ExcelActionOccurred::dispatch('Child', ActionType::EXPORT, auth()->user());
 
-        return Excel::download(new ChildrenExport($this->exportQuery()), 'children.xlsx');
+        $query = $this->exportQuery();
+
+        // Up to the threshold the XLSX download is exactly what it always
+        // was. Above it the same columns and values go out as a CSV file that
+        // is written and checked in full before it is sent: PhpSpreadsheet
+        // holds a whole workbook in memory, and a large one cannot be built.
+        if ((clone $query)->count() > CsvExport::THRESHOLD) {
+            return CsvExport::start(new ChildrenExport($query), 'children.export', 'children.csv');
+        }
+
+        return Excel::download(new ChildrenExport($query), 'children.xlsx');
     }
 
     public function downloadPdf()

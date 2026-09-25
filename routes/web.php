@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ActivityHeartbeatController;
 use App\Http\Controllers\ActivityPageLeaveController;
+use App\Http\Controllers\CsvExportDownloadController;
 use App\Http\Controllers\PdfExportDownloadController;
 use App\Http\Controllers\SessionKeepAliveController;
 use App\Http\Controllers\SwitchLocaleController;
@@ -44,3 +45,10 @@ Route::post('/activity/leave', ActivityPageLeaveController::class)
 Route::get('/exports/pdf/{ticket}', PdfExportDownloadController::class)
     ->whereAlphaNumeric('ticket')
     ->name('exports.pdf');
+
+// A listing too large for the XLSX download, collected as a CSV file that is
+// written and checked in full before it is sent. Outside `auth` for the same
+// reason as the PDF route: it answers 404 and 403 itself.
+Route::get('/exports/csv/{ticket}', CsvExportDownloadController::class)
+    ->whereAlphaNumeric('ticket')
+    ->name('exports.csv');

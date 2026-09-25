@@ -52,17 +52,22 @@ final class ChildFollowUpTransfer
             return null;
         }
 
+        // A child whose history ended in a death is never admitted again.
+        if (FollowUpChild::isTerminal($child->child_id)) {
+            return null;
+        }
+
         // A child whose latest closed episode classifies a return is the same
         // child coming back, and the new episode is linked to that episode
-        // so it says what it is: a readmission after a default or an other
-        // exit, or a relapse after a cured SAM/MAM episode. After any other
-        // closed outcome - non-responded, died, cured with no SAM/MAM
+        // so it says what it is: a readmission after a default, an other
+        // exit, or a cured SAM/MAM episode (after relapse). After
+        // any other closed outcome - non-responded, cured with no SAM/MAM
         // classification - the episode opens as a first admission with no
         // link, exactly as it always did. The closed episode is only read
         // here, never written.
         $previous = FollowUpChild::classifyingEpisodeFor($child->child_id);
 
-        return static::open($child, $fi, $previous);
+        return static::open($child, $fi, $previous, FollowUpChild::readmissionClassificationFor($child->child_id));
     }
 
     /**
@@ -87,6 +92,11 @@ final class ChildFollowUpTransfer
             return null;
         }
 
+        // A child whose history ended in a death is never readmitted.
+        if (FollowUpChild::isTerminal($child->child_id)) {
+            return null;
+        }
+
         // Only a closed episode whose outcome allows a readmission qualifies.
         $previous = FollowUpChild::readmittableEpisodeFor($child->child_id);
 
@@ -94,7 +104,7 @@ final class ChildFollowUpTransfer
             return null;
         }
 
-        return static::open($child, $fi, $previous);
+        return static::open($child, $fi, $previous, $previous->classifiesReturnAs());
     }
 
     /**
@@ -167,18 +177,26 @@ final class ChildFollowUpTransfer
      * Write the episode and its first visit, inside one transaction.
      *
      * With a closed episode to follow on from, the row carries the link to
-     * it, and is a readmission when that episode's outcome allows one - a
-     * default or an eligible other exit. A relapse follows a cured episode,
-     * which allows no readmission, so the row is a new admission that
-     * carries the link: the link is what tells a relapse from a first-ever
-     * admission. Either way the previous record, if any, is never written.
+     * it; the link is what the classification is read from afterwards. The
+     * stored admission_type is written to agree with that classification -
+     * a readmission after a default, an other exit or a relapse, and a new
+     * admission otherwise - but it is a record of the moment, and nothing
+     * classifies from it. Either way the
+     * previous record, if any, is never written.
+     *
+     * The admission is dated by the screening that raised it, never by the
+     * day somebody acted on that screening: the reports count an admission
+     * in its month and take the child's age on its day.
      */
-    private static function open(Child $child, string $fi, ?FollowUpChild $previous): FollowUpChild
+    private static function open(Child $child, string $fi, ?FollowUpChild $previous, ?string $classification): FollowUpChild
     {
         $readingDate = static::date($child->date_of_reporting) ?? Carbon::today();
         $dob = static::date($child->date_of_birth);
+        $admissionType = in_array($classification, FollowUpChild::READMISSION_KINDS, true)
+            ? FollowUpChild::ADMISSION_READMISSION
+            : FollowUpChild::ADMISSION_NEW;
 
-        return DB::transaction(function () use ($child, $fi, $readingDate, $dob, $previous): FollowUpChild {
+        return DB::transaction(function () use ($child, $fi, $readingDate, $dob, $previous, $admissionType): FollowUpChild {
             $followUpChild = FollowUpChild::create([
                 'id_number' => $child->child_id,
                 'child_name' => $child->name,
@@ -191,10 +209,8 @@ final class ChildFollowUpTransfer
                 // Fixed by the rule that produced this admission.
                 'causes_of_admission' => 'malnutrition',
                 'admitted_with' => $fi,
-                'admission_type' => $previous?->isReadmissionEligible()
-                    ? FollowUpChild::ADMISSION_READMISSION
-                    : FollowUpChild::ADMISSION_NEW,
-                'admission_date' => Carbon::today(),
+                'admission_type' => $admissionType,
+                'admission_date' => $readingDate,
                 'discharge_outcome' => FollowUpChild::ACTIVE_OUTCOME,
                 'discharge_date' => null,
                 'source_child_visit_id' => $child->getKey(),

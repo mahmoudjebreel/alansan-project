@@ -74,7 +74,8 @@ class FollowUpChildResource extends Resource
     }
 
     /**
-     * The three readmission classifications, by the value the model decides.
+     * The three classifications of an episode that follows a closed one, by
+     * the value the model decides.
      *
      * @return array<string, string>
      */
@@ -127,10 +128,9 @@ class FollowUpChildResource extends Resource
      * How one episode is classified in the listing.
      *
      * The readmission part is not decided here: it is read straight off
-     * FollowUpChild::readmissionClassification(), the same method the
-     * spreadsheet's readmission_classification column is written from, so
-     * the listing and the export can never disagree about an episode. No
-     * second algorithm is introduced and no time-based rule is invented.
+     * FollowUpChild::readmissionClassification(), which is the one SQL
+     * definition the spreadsheet, the filters and the MEAL report read too,
+     * so none of them can disagree about an episode.
      *
      * @see \App\Models\FollowUpChild::readmissionClassification()
      * @see \App\Exports\FollowUpChildrenExport::formatValue()
@@ -162,18 +162,10 @@ class FollowUpChildResource extends Resource
     /**
      * The filter behind the column: the same five cases, as a query.
      *
-     * The column itself calls the model method one record at a time, which
-     * a WHERE clause cannot do, so the previous episode's side of
-     * classifiesReturnAs() is expressed here as a constraint on the linked
-     * record. Both sides read the same three facts about that record - its
-     * discharge outcome, and for a cure its admission classification - so
-     * the filter selects exactly the rows the column names.
+     * The very expression the column's value is selected by, so the filter
+     * selects exactly the rows the column names.
      *
-     * The linked episode is matched from the trash as well, because
-     * readmissionClassification() reads it from the trash: the
-     * classification was settled when the episode was opened.
-     *
-     * @see \App\Models\FollowUpChild::classifiesReturnAs()
+     * @see \App\Models\FollowUpChild::readmissionClassificationSql()
      */
     public static function applyCaseClassificationFilter(Builder $query, ?string $value): Builder
     {
@@ -181,21 +173,14 @@ class FollowUpChildResource extends Resource
             return $query;
         }
 
+        $classification = FollowUpChild::readmissionClassificationSql($query->getModel()->getTable());
+
         if (array_key_exists($value, static::readmissionClassificationOptions())) {
-            return $query->whereHas(
-                'previousEpisode',
-                fn (Builder $previous): Builder => static::previousEpisodeClassifying($previous->withTrashed(), $value),
-            );
+            return $query->whereRaw("{$classification} = ?", [$value]);
         }
 
         // Neither case follows on from anything the module classifies.
-        $query->whereDoesntHave('previousEpisode', function (Builder $previous): void {
-            $previous->withTrashed()->where(function (Builder $any): void {
-                foreach (FollowUpChild::READMISSION_CLASSIFICATIONS as $classification) {
-                    $any->orWhere(fn (Builder $one): Builder => static::previousEpisodeClassifying($one, $classification));
-                }
-            });
-        });
+        $query->whereRaw("{$classification} IS NULL");
 
         return $value === self::CASE_DEFAULTED
             ? $query->where('discharge_outcome', FollowUpChild::DEFAULTED_OUTCOME)
@@ -206,23 +191,31 @@ class FollowUpChildResource extends Resource
     }
 
     /**
-     * What the previous episode must look like for a return after it to
-     * carry the given classification - the query side of
-     * FollowUpChild::classifiesReturnAs(), and nothing more.
+     * The admission type filter, over the derived admission type: a
+     * readmission after a default, an other exit or a relapse, and a new
+     * admission otherwise. The stored admission_type is not consulted.
      *
-     * Every outcome named here is one of CLOSING_OUTCOMES, so the "must be
-     * closed" half of that method is already implied by matching on it.
+     * @see \App\Models\FollowUpChild::derivedAdmissionType()
      */
-    private static function previousEpisodeClassifying(Builder $previous, string $classification): Builder
+    public static function applyAdmissionTypeFilter(Builder $query, ?string $value): Builder
     {
-        return match ($classification) {
-            FollowUpChild::READMISSION_AFTER_DEFAULTED => $previous
-                ->where('discharge_outcome', FollowUpChild::DEFAULTED_OUTCOME),
-            FollowUpChild::READMISSION_AFTER_OTHER => $previous
-                ->whereIn('discharge_outcome', FollowUpChild::OTHER_READMISSION_OUTCOMES),
-            FollowUpChild::READMISSION_AFTER_RELAPSE => $previous
-                ->where('discharge_outcome', FollowUpChild::CURED_OUTCOME)
-                ->whereIn('admitted_with', [MuacClassifier::SAM, MuacClassifier::MAM]),
+        if ($value === null || $value === '') {
+            return $query;
+        }
+
+        $classification = FollowUpChild::readmissionClassificationSql($query->getModel()->getTable());
+        $kinds = implode(', ', array_fill(0, count(FollowUpChild::READMISSION_KINDS), '?'));
+
+        return match ($value) {
+            FollowUpChild::ADMISSION_READMISSION => $query->whereRaw(
+                "{$classification} IN ({$kinds})",
+                FollowUpChild::READMISSION_KINDS,
+            ),
+            FollowUpChild::ADMISSION_NEW => $query->whereRaw(
+                "COALESCE({$classification}, '') NOT IN ({$kinds})",
+                FollowUpChild::READMISSION_KINDS,
+            ),
+            default => $query,
         };
     }
 
@@ -415,6 +408,10 @@ class FollowUpChildResource extends Resource
                     ->label(__('fields.admission_type'))
                     ->options(static::admissionTypeOptions())
                     ->placeholder(__('fields.admission_new'))
+                    // Shown as the history decides it, not as stored.
+                    ->formatStateUsing(fn (?FollowUpChild $record, ?string $state): ?string => $record?->exists
+                        ? $record->derivedAdmissionType()
+                        : $state)
                     ->disabled()
                     ->dehydrated(false),
                 // A closing outcome needs the date it closed on: the closed
@@ -544,12 +541,12 @@ class FollowUpChildResource extends Resource
                     FilamentInfolist::text('admitted_with'),
                     TextEntry::make('admission_type')
                         ->label(__('fields.admission_type'))
-                        ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->admissionType()])
+                        ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->derivedAdmissionType()])
                         ->badge()
-                        ->color(fn (FollowUpChild $record): string => $record->isReadmission() ? 'warning' : 'info'),
+                        ->color(fn (FollowUpChild $record): string => $record->derivedAdmissionType() === FollowUpChild::ADMISSION_READMISSION ? 'warning' : 'info'),
                     // After defaulted, after other, or after relapse - read
-                    // from the closed episode this one is linked to. Shown
-                    // only when there is one to read.
+                    // from the episode this one follows. Shown only when
+                    // there is one to read.
                     TextEntry::make('readmission_classification')
                         ->label(__('fields.readmission_classification'))
                         ->state(fn (FollowUpChild $record): ?string => static::readmissionClassificationLabel($record->readmissionClassification()))
@@ -615,13 +612,14 @@ class FollowUpChildResource extends Resource
                     RepeatableEntry::make('follow_up_history')
                         ->hiddenLabel()
                         ->state(fn (FollowUpChild $record): array => $record->otherEpisodes()
+                            ->withAdmissionClassification()
                             ->withCount('visits')
                             ->get()
                             ->map(fn (FollowUpChild $episode): array => [
                                 'id' => $episode->getKey(),
                                 'admission_date' => $episode->admission_date?->format('Y-m-d'),
-                                'admission_type' => static::admissionTypeOptions()[$episode->admissionType()],
-                                'is_readmission' => $episode->isReadmission(),
+                                'admission_type' => static::admissionTypeOptions()[$episode->derivedAdmissionType()],
+                                'is_readmission' => $episode->derivedAdmissionType() === FollowUpChild::ADMISSION_READMISSION,
                                 'visits_count' => $episode->visits_count,
                                 'discharge_outcome' => filled($episode->discharge_outcome)
                                     ? __('fields.' . $episode->discharge_outcome)
@@ -665,7 +663,8 @@ class FollowUpChildResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('visits'))
+            // Every row carries its classification, selected with the page.
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('visits')->withAdmissionClassification())
             ->columns([
                 Tables\Columns\TextColumn::make('id_number')
                     ->label(__('fields.id_number'))
@@ -690,9 +689,9 @@ class FollowUpChildResource extends Resource
                     ->color(fn (?string $state): string => MuacClassifier::color($state)),
                 Tables\Columns\TextColumn::make('admission_type')
                     ->label(__('fields.admission_type'))
-                    ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->admissionType()])
+                    ->state(fn (FollowUpChild $record): string => static::admissionTypeOptions()[$record->derivedAdmissionType()])
                     ->badge()
-                    ->color(fn (FollowUpChild $record): string => $record->isReadmission() ? 'warning' : 'info'),
+                    ->color(fn (FollowUpChild $record): string => $record->derivedAdmissionType() === FollowUpChild::ADMISSION_READMISSION ? 'warning' : 'info'),
                 // What kind of case the episode is, derived from the closed
                 // episode it follows on from exactly as the spreadsheet's
                 // readmission_classification column is.
@@ -780,15 +779,12 @@ class FollowUpChildResource extends Resource
                 Tables\Filters\SelectFilter::make('admission_type')
                     ->label(__('fields.admission_type'))
                     ->options(static::admissionTypeOptions())
-                    // A blank admission type is a first admission.
-                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
-                        FollowUpChild::ADMISSION_NEW => $query->where(function (Builder $query): void {
-                            $query->whereNull('admission_type')
-                                ->orWhere('admission_type', FollowUpChild::ADMISSION_NEW);
-                        }),
-                        FollowUpChild::ADMISSION_READMISSION => $query->where('admission_type', FollowUpChild::ADMISSION_READMISSION),
-                        default => $query,
-                    }),
+                    // The derived admission type, exactly as the column shows it.
+                    // @see static::applyAdmissionTypeFilter()
+                    ->query(fn (Builder $query, array $data): Builder => static::applyAdmissionTypeFilter(
+                        $query,
+                        $data['value'] ?? null,
+                    )),
                 // The column's five cases, as a filter.
                 // @see static::applyCaseClassificationFilter()
                 Tables\Filters\SelectFilter::make('case_classification')

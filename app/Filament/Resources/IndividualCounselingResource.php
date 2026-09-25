@@ -194,7 +194,6 @@ class IndividualCounselingResource extends Resource
                     ])),
                 Forms\Components\TextInput::make('mother_id_number')
                     ->label(__('fields.mother_id_number'))
-                    ->required()
                     ->rules(['regex:/^[0-9]{9}$/'])
                     ->maxLength(9)
                     ->validationMessages(static::messagesFor('mother_id_number', [

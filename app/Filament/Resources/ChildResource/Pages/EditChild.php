@@ -91,6 +91,17 @@ class EditChild extends EditRecord
             return;
         }
 
+        // A child whose history ended in a death is never admitted again.
+        if (FollowUpChild::isTerminal($child->child_id)) {
+            Notification::make()
+                ->title(__('ui.died_terminal.follow_up_refused'))
+                ->body(__('ui.died_terminal.message'))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
         $followUpChild = ChildFollowUpTransfer::refer($child);
 
         if (! $followUpChild instanceof FollowUpChild) {

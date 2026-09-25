@@ -97,9 +97,18 @@ class ReferralClosedFollowUpIdentityTest extends TestCase
 
         $result = ReferralProcessor::refer([$child->getKey()]);
 
-        $this->assertSame(0, $result['referred']);
-        $this->assertSame(1, $result['skipped_closed']);
-        $this->assertSame(1, FollowUpChild::where('id_number', $child->child_id)->count(), 'No duplicate record.');
+        // What the bulk referral does depends on how the history closed: a
+        // default or an other exit waits for the one-child Readmission
+        // action, a death is final, and a cure or a non-response is referred
+        // into a NEW episode. The closed episode is never re-opened.
+        [$key, $episodes] = match (true) {
+            $episode->discharge_outcome === FollowUpChild::DIED_OUTCOME => ['skipped_died', 1],
+            $episode->isReadmissionEligible() => ['skipped_closed', 1],
+            default => ['referred', 2],
+        };
+
+        $this->assertSame(1, $result[$key], "[{$episode->discharge_outcome}]");
+        $this->assertSame($episodes, FollowUpChild::where('id_number', $child->child_id)->count(), "[{$episode->discharge_outcome}] episode count.");
         $this->assertSame($episode->discharge_outcome, $episode->fresh()->discharge_outcome, 'The closed episode is untouched.');
     }
 
