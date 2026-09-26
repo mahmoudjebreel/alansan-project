@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\IndividualCounseling;
+use App\Support\RichText;
 use Illuminate\Database\Eloquent\Builder;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -72,13 +73,14 @@ class IndividualCounselingPdfExport
             ],
             'empty' => __('fields.no_follow_up_sessions'),
             // Position in the sequence is the session number, matching the
-            // order the spreadsheet's column groups use.
+            // order the spreadsheet's column groups use. The notes print as
+            // text, as they do in the spreadsheet.
             'rows' => fn (IndividualCounseling $record): array => $record->followups
                 ->values()
                 ->map(fn ($session): array => [
                     $session->follow_up_visit_date?->format('Y-m-d'),
-                    $session->assess_and_analyze,
-                    $session->act,
+                    RichText::toPlain($session->assess_and_analyze),
+                    RichText::toPlain($session->act),
                 ])
                 ->all(),
         ];

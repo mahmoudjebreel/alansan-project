@@ -109,16 +109,25 @@ class ChildResource extends Resource
                     // leading zero. @see \App\Support\Forms\DigitStringField
                     ->extraInputAttributes(DigitStringField::inputAttributes())
                     ->rules(['regex:/^[0-9]{9}$/'])
-                    // A child whose history ended in a death is not screened
-                    // again after it. An existing screening keeps its own ID
-                    // and date and may still be corrected.
+                    // A child recorded as died is never registered as a child
+                    // again: a new record, or an existing record given that
+                    // child's ID, is refused whatever its date. An existing
+                    // record keeping its own ID may still be corrected; only
+                    // a changed date is then measured against the death.
+                    // @see \App\Support\TerminalChild::refusesRegistration()
                     // @see \App\Support\TerminalChild::refusesScreening()
                     ->rule(fn (Get $get, ?Child $record): \Closure => function (string $attribute, mixed $value, \Closure $fail) use ($get, $record): void {
                         $date = $get('date_of_reporting');
 
-                        if ($record?->exists
-                            && (string) $record->child_id === (string) $value
-                            && $record->date_of_reporting?->format('Y-m-d') === (filled($date) ? \Carbon\Carbon::parse($date)->format('Y-m-d') : null)) {
+                        if (! $record?->exists || (string) $record->child_id !== (string) $value) {
+                            if (($reason = TerminalChild::refusesRegistration($value)) !== null) {
+                                $fail($reason);
+                            }
+
+                            return;
+                        }
+
+                        if ($record->date_of_reporting?->format('Y-m-d') === (filled($date) ? \Carbon\Carbon::parse($date)->format('Y-m-d') : null)) {
                             return;
                         }
 
@@ -368,7 +377,9 @@ class ChildResource extends Resource
             ? FollowUpChild::readmissionClassificationFor($childId)
             : null;
 
-        $terminal = $episode !== null && FollowUpChild::isTerminal($childId);
+        // Trash included: a died episode in the trash still ends the history,
+        // and the latest live episode read above may be none at all.
+        $terminal = filled($childId) && FollowUpChild::isTerminal($childId);
 
         $livewire->dispatch('follow-up-history-known', [
             'child_id' => (string) $childId,
@@ -1026,7 +1037,12 @@ class ChildResource extends Resource
                 // "is this row trashed?" check, and replacing it would put
                 // them on live rows.
                 \Filament\Actions\RestoreAction::make()
-                    ->hidden(fn (): bool => ! static::allowsAction('delete')),
+                    ->hidden(fn (): bool => ! static::allowsAction('delete'))
+                    // The model refuses a screening dated after the child's
+                    // death; the reason is told, not swallowed.
+                    ->failureNotification(fn (\Filament\Notifications\Notification $notification, Child $record): \Filament\Notifications\Notification => $notification
+                        ->title(__('ui.died_terminal.restore_refused_title'))
+                        ->body(TerminalChild::refusesChildRestore($record) ?? __('ui.died_terminal.child_restore_refused'))),
                 \Filament\Actions\ForceDeleteAction::make()
                     ->hidden(fn (): bool => ! static::allowsAction('delete')),
             ])

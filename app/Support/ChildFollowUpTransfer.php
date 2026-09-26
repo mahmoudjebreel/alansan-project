@@ -321,10 +321,18 @@ final class ChildFollowUpTransfer
      *
      * Only ever called for the "Cured" outcome; the other four outcomes are
      * human decisions that close the record without producing anything here.
+     *
+     * Returns null, and writes nothing, when the Children record would be
+     * dated after the child's death (refusesDischargeToChildren()): a dead
+     * child is not returned to the programme.
      */
-    public static function discharge(FollowUpChild $followUpChild, FollowUpChildVisit $latestVisit): Child
+    public static function discharge(FollowUpChild $followUpChild, FollowUpChildVisit $latestVisit): ?Child
     {
-        $visitDate = $latestVisit->visit_date ? Carbon::parse($latestVisit->visit_date) : Carbon::today();
+        if (static::refusesDischargeToChildren($followUpChild, $latestVisit) !== null) {
+            return null;
+        }
+
+        $visitDate = static::dischargeDate($latestVisit);
 
         return Child::create([
             // Stated explicitly by the rule, not derived from the relapse check.
@@ -349,6 +357,28 @@ final class ChildFollowUpTransfer
             'screener_profession' => 'CHW',
             'source_follow_up_child_id' => $followUpChild->getKey(),
         ]);
+    }
+
+    /**
+     * The reason the Children record a discharge would write is refused, or
+     * null when it may be written: the record carries the date of the visit
+     * that discharged the child, and a child recorded as died is not given
+     * a screening dated after the death.
+     *
+     * @see \App\Support\TerminalChild::refusesScreening()
+     */
+    public static function refusesDischargeToChildren(FollowUpChild $followUpChild, FollowUpChildVisit $latestVisit): ?string
+    {
+        return TerminalChild::refusesScreening($followUpChild->id_number, static::dischargeDate($latestVisit));
+    }
+
+    /**
+     * The date the Children record written by a discharge carries: the
+     * discharging visit's own, or today when the visit has none.
+     */
+    private static function dischargeDate(FollowUpChildVisit $latestVisit): Carbon
+    {
+        return $latestVisit->visit_date ? Carbon::parse($latestVisit->visit_date) : Carbon::today();
     }
 
     /**

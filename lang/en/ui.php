@@ -148,6 +148,7 @@ return [
             'not_cured' => 'No record was created: this follow-up case is not closed as cured.',
             'missing_data' => 'No record was created: the child is missing a name, an ID number or a sex.',
             'no_visit' => 'No record was created: the follow-up case has no attended visit to carry a measurement from.',
+            'died' => 'No record was created: this child is recorded in Follow-Up as Died, and the record would be dated after the death.',
         ],
     ],
 
@@ -298,6 +299,10 @@ return [
         'restore_refused_title' => 'Not restored',
         'restore_refused' => 'This Follow-Up episode cannot be restored: it is dated after the child\'s Follow-Up episode that ended with Died.',
         'restore_refused_count' => ':count Follow-Up episode(s) were not restored because they are dated after the child\'s Follow-Up episode that ended with Died. They stay in the trash.',
+        'registration_refused' => 'This child ID is already recorded in Follow-Up as Died and cannot be registered as a child again.',
+        'child_restore_refused' => 'This Children record cannot be restored: it is dated after the child\'s Follow-Up episode that ended with Died.',
+        'child_restore_refused_count' => ':count Children record(s) were not restored because they are dated after the child\'s Follow-Up episode that ended with Died. They stay in the trash.',
+        'children_record_refused' => 'Children record not created',
     ],
 
     'follow_up_import' => [

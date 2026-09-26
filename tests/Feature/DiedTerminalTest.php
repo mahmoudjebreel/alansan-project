@@ -24,8 +24,8 @@ use Maatwebsite\Excel\Facades\Excel;
 use Tests\TestCase;
 
 /**
- * Died is final. A child whose latest closed follow-up episode ended as died
- * is never entered again after the death - not as a new admission, not as a
+ * Died is final. A child with any follow-up episode that ended as died (trash
+ * included) is never entered again after the death - not as a new admission, not as a
  * follow-up, not as a readmission or a relapse, not by referral and not by an
  * upload - while the death itself and everything before it stay on file,
  * readable and exportable.
@@ -176,14 +176,15 @@ class DiedTerminalTest extends TestCase
         $this->assertNull(ChildFollowUpTransfer::refer($this->screening('2026-09-10', 110)));
     }
 
-    public function test_the_latest_closed_episode_decides(): void
+    public function test_a_later_closed_episode_does_not_undo_the_death(): void
     {
-        // A death that is not the latest closed episode (a later episode was
-        // recorded and closed after it) does not decide.
+        // Any died episode on file is final: an episode recorded and closed
+        // after it does not make the child active again.
         $this->diedEpisode(['admission_date' => '2026-05-01', 'discharge_date' => '2026-05-20']);
         $this->episode(['admission_date' => '2026-06-01', 'discharge_date' => '2026-07-01', 'discharge_outcome' => 'non_responded']);
 
-        $this->assertFalse(FollowUpChild::isTerminal(self::CHILD_ID));
+        $this->assertTrue(FollowUpChild::isTerminal(self::CHILD_ID));
+        $this->assertNull(ChildFollowUpTransfer::refer($this->screening('2026-09-10', 110)));
     }
 
     // =================================================================

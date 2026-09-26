@@ -9,6 +9,7 @@ use App\Filament\Tables\Columns\YesNoColumn;
 use App\Models\IndividualCounseling;
 use App\Support\FilamentInfolist;
 use App\Support\Forms\BooleanSelectField;
+use App\Support\RichText;
 use Filament\Forms;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -30,6 +31,15 @@ class IndividualCounselingResource extends Resource
     use AuthorizesModuleActions;
 
     protected static ?string $model = IndividualCounseling::class;
+
+    /**
+     * The rich-text fields, on the record and on a follow-up session. The
+     * edit page and the exports use the same lists, so a field is never rich
+     * on one side and plain on the other.
+     */
+    public const RICH_TEXT_FIELDS = ['assess', 'analyze', 'act'];
+
+    public const RICH_TEXT_SESSION_FIELDS = ['assess_and_analyze', 'act'];
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-chat-bubble-left-right';
 
@@ -355,18 +365,9 @@ class IndividualCounselingResource extends Resource
                 // prose written in the counsellor's own words, never a pick
                 // list — the historical option list could not cover what
                 // actually gets recorded.
-                Forms\Components\Textarea::make('assess')
-                    ->label(__('fields.assess'))
-                    ->rows(3)
-                    ->columnSpanFull(),
-                Forms\Components\Textarea::make('analyze')
-                    ->label(__('fields.analyze'))
-                    ->rows(3)
-                    ->columnSpanFull(),
-                Forms\Components\Textarea::make('act')
-                    ->label(__('fields.act'))
-                    ->rows(3)
-                    ->columnSpanFull(),
+                static::richTextField('assess'),
+                static::richTextField('analyze'),
+                static::richTextField('act'),
             ])->columns(2);
     }
 
@@ -393,16 +394,15 @@ class IndividualCounselingResource extends Resource
                                 'required' => 'val_required',
                                 'date' => 'val_date',
                             ])),
-                        Forms\Components\Textarea::make('assess_and_analyze')
-                            ->label(__('fields.assess_and_analyze'))
-                            ->rows(3)
-                            ->columnSpanFull(),
-                        Forms\Components\Textarea::make('act')
-                            ->label(__('fields.act'))
-                            ->rows(3)
-                            ->columnSpanFull(),
+                        static::richTextField('assess_and_analyze'),
+                        static::richTextField('act'),
                     ])
                     ->columns(2)
+                    // A session saved as plain text (before the rich editor,
+                    // or by the spreadsheet import) keeps its line breaks.
+                    ->mutateRelationshipDataBeforeFillUsing(
+                        fn (array $data): array => RichText::hydrate($data, static::RICH_TEXT_SESSION_FIELDS),
+                    )
                     ->itemNumbers()
                     ->itemLabel(fn (array $state): ?string => filled($state['follow_up_visit_date'] ?? null)
                         ? __('fields.follow_up_visit_date') . ': ' . $state['follow_up_visit_date']
@@ -416,6 +416,27 @@ class IndividualCounselingResource extends Resource
                     ->collapsible()
                     ->deleteAction(fn (\Filament\Actions\Action $action) => $action->requiresConfirmation()),
             ]);
+    }
+
+    /**
+     * One of the counsellor's free-prose fields: a rich editor limited to the
+     * formatting a case note needs (emphasis and lists), with no headings,
+     * links, tables or file attachments to store.
+     */
+    protected static function richTextField(string $name): Forms\Components\RichEditor
+    {
+        return Forms\Components\RichEditor::make($name)
+            ->label(__("fields.{$name}"))
+            ->toolbarButtons([
+                ['bold', 'italic', 'underline'],
+                ['bulletList', 'orderedList'],
+                ['undo', 'redo'],
+            ])
+            ->fileAttachments(false)
+            // An untouched editor is an empty paragraph, not an empty note;
+            // a note nobody wrote stays null, as it always was.
+            ->dehydrateStateUsing(fn (?string $state): ?string => RichText::isBlank($state) ? null : $state)
+            ->columnSpanFull();
     }
 
     /**
@@ -497,13 +518,13 @@ class IndividualCounselingResource extends Resource
                                     FilamentInfolist::boolean('iycf_form_filled'),
                                     FilamentInfolist::enum('status'),
                                     FilamentInfolist::enum('outcome'),
-                                    FilamentInfolist::text('assess'),
+                                    FilamentInfolist::richText('assess'),
                                     FilamentInfolist::enum('pregnancy'),
                                     FilamentInfolist::enum('lactating'),
                                     FilamentInfolist::date('delivery_date'),
                                     FilamentInfolist::text('pregnancy_count'),
-                                    FilamentInfolist::text('analyze')->columnSpanFull(),
-                                    FilamentInfolist::text('act')->columnSpanFull(),
+                                    FilamentInfolist::richText('analyze')->columnSpanFull(),
+                                    FilamentInfolist::richText('act')->columnSpanFull(),
                                 ])->columns(2),
                             Section::make(__('fields.follow_up_sessions'))
                                 ->schema([
@@ -512,8 +533,8 @@ class IndividualCounselingResource extends Resource
                                         ->hiddenLabel()
                                         ->schema([
                                             FilamentInfolist::date('follow_up_visit_date'),
-                                            FilamentInfolist::text('assess_and_analyze'),
-                                            FilamentInfolist::text('act'),
+                                            FilamentInfolist::richText('assess_and_analyze'),
+                                            FilamentInfolist::richText('act'),
                                         ])
                                         ->columns(3),
                                 ]),

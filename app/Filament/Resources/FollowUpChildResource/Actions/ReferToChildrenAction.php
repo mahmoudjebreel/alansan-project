@@ -65,6 +65,10 @@ final class ReferToChildrenAction
                     $blocker = CuredChildrenReferral::blocker($record->fresh())
                         ?? CuredChildrenReferral::BLOCKER_ALREADY_EXISTS;
 
+                    if ($blocker === CuredChildrenReferral::BLOCKER_DIED) {
+                        \App\Support\TerminalChild::audit('cured_referral', $record->id_number, ['follow_up_child_id' => $record->getKey()]);
+                    }
+
                     Notification::make()
                         ->title(__('ui.cured_referral.blocked.' . $blocker))
                         ->danger()

@@ -118,12 +118,32 @@ class EditFollowUpChild extends EditRecord
             return;
         }
 
+        // A child recorded as died is not returned to the Children module
+        // after the death. Nothing is written - the episode stays as it is -
+        // and the reason is told and audited.
+        if (($reason = ChildFollowUpTransfer::refusesDischargeToChildren($record, $latestVisit)) !== null) {
+            \App\Support\TerminalChild::audit('follow_up_discharge', $record->id_number, ['follow_up_child_id' => $record->getKey()]);
+
+            Notification::make()
+                ->title(__('ui.died_terminal.children_record_refused'))
+                ->body($reason)
+                ->danger()
+                ->persistent()
+                ->send();
+
+            return;
+        }
+
         $record->update([
             'discharge_outcome' => FollowUpChild::CURED_OUTCOME,
             'discharge_date' => $latestVisit->visit_date,
         ]);
 
         $child = ChildFollowUpTransfer::discharge($record, $latestVisit);
+
+        if ($child === null) {
+            return;
+        }
 
         Notification::make()
             ->title(__('fields.discharged_as_cured'))

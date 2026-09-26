@@ -482,12 +482,14 @@ class FollowUpChild extends Model
     // -----------------------------------------------------------------
 
     /**
-     * The episode that ended this child's history, or null when the child's
-     * latest closed episode did not end as died.
+     * The episode that ended this child's history, or null when the child has
+     * never had an episode that ended as died.
      *
-     * The latest closed episode decides, ordered exactly as
-     * latestClosedEpisodeFor() orders it, but read from the trash as well: a
-     * death recorded and then deleted must not quietly allow the child back.
+     * Any died episode on file makes the child terminal for good, trash
+     * included: a death is a fact about the child, and neither a later episode
+     * - open, closed, deleted or restored - nor deleting the death itself
+     * takes it back. When the file holds more than one, the earliest (by
+     * admission, then id) is the one every date rule is measured from.
      */
     public static function terminalEpisodeFor(mixed $idNumber): ?self
     {
@@ -495,16 +497,16 @@ class FollowUpChild extends Model
             return null;
         }
 
-        $latest = static::withTrashed()
+        return static::withTrashed()
             ->where('id_number', $idNumber)
-            ->latestClosedFirst()
+            ->where('discharge_outcome', self::DIED_OUTCOME)
+            ->orderBy('admission_date')
+            ->orderBy('id')
             ->first();
-
-        return $latest?->discharge_outcome === self::DIED_OUTCOME ? $latest : null;
     }
 
     /**
-     * Whether this child ID's latest closed episode ended as died.
+     * Whether this child ID has ever had an episode that ended as died.
      */
     public static function isTerminal(mixed $idNumber): bool
     {
@@ -512,35 +514,36 @@ class FollowUpChild extends Model
     }
 
     /**
-     * Every child ID whose latest closed episode ended as died, with the
+     * Every child ID that has ever had an episode that ended as died, with the
      * dates of that episode - the same decision as terminalEpisodeFor(), for
      * the whole table in one query, so an upload or a bulk referral of any
      * size is checked without a query per row.
      *
-     * Only died episodes are read, each kept when no closed episode of the
-     * same child (trash included) ranks before it in latestClosedFirst()
-     * order - the condition latestClosedSql() writes out.
+     * Only died episodes are read, trash included, in the order
+     * terminalEpisodeFor() reads them, so the first one met for a child is
+     * the one it would pick.
      *
      * @return array<string, array{admitted: ?string, died_on: ?string}>
      */
     public static function terminalEpisodes(): array
     {
-        $table = (new static)->getTable();
-        $alias = 'terminal';
+        $terminal = [];
 
-        return DB::table("{$table} as {$alias}")
-            ->whereNotNull("{$alias}.id_number")
-            ->where("{$alias}.discharge_outcome", self::DIED_OUTCOME)
-            ->whereRaw(static::latestClosedSql($alias))
-            ->select(["{$alias}.id_number", "{$alias}.admission_date", "{$alias}.discharge_date"])
+        DB::table((new static)->getTable())
+            ->whereNotNull('id_number')
+            ->where('discharge_outcome', self::DIED_OUTCOME)
+            ->orderBy('admission_date')
+            ->orderBy('id')
+            ->select(['id_number', 'admission_date', 'discharge_date'])
             ->get()
-            ->mapWithKeys(static fn (object $row): array => [
-                (string) $row->id_number => [
+            ->each(static function (object $row) use (&$terminal): void {
+                $terminal[(string) $row->id_number] ??= [
                     'admitted' => static::day($row->admission_date),
                     'died_on' => static::day($row->discharge_date),
-                ],
-            ])
-            ->all();
+                ];
+            });
+
+        return $terminal;
     }
 
     /**
@@ -572,7 +575,8 @@ class FollowUpChild extends Model
 
     /**
      * "The child ID in $idColumn is terminal" as SQL - terminalEpisodeFor()
-     * for a correlated query, such as a Children listing.
+     * for a correlated query, such as a Children listing: any died episode on
+     * file, trash included.
      */
     public static function terminalChildSql(string $idColumn): string
     {
@@ -583,8 +587,7 @@ class FollowUpChild extends Model
             SELECT 1 FROM {$table} AS {$alias}
             WHERE {$alias}.id_number = {$idColumn}
               AND {$alias}.discharge_outcome = '" . self::DIED_OUTCOME . "'
-              AND " . static::latestClosedSql($alias) . '
-        )';
+        )";
     }
 
     /**

@@ -311,9 +311,9 @@ class IndividualCounselingFormTest extends TestCase
 
         $this->assertCount(2, $followups);
         $this->assertSame('2026-09-01', $followups[0]->follow_up_visit_date->format('Y-m-d'));
-        $this->assertSame('تقييم أول', $followups[0]->assess_and_analyze);
+        $this->assertSame('<p>تقييم أول</p>', $followups[0]->assess_and_analyze);
         $this->assertSame('2026-09-15', $followups[1]->follow_up_visit_date->format('Y-m-d'));
-        $this->assertSame('إجراء ثانٍ', $followups[1]->act);
+        $this->assertSame('<p>إجراء ثانٍ</p>', $followups[1]->act);
         // Filament's orderColumn numbers repeater rows from 1.
         $this->assertSame([1, 2], $followups->pluck('sort_order')->all());
     }
@@ -481,9 +481,10 @@ class IndividualCounselingFormTest extends TestCase
 
         $record = IndividualCounseling::first();
 
-        $this->assertSame('الطفلة تعاني من نقص واضح في الوزن مع صعوبة في الرضاعة، وتقييم مطوّل مكتوب بحرية دون أي قائمة خيارات جاهزة.', $record->assess);
-        $this->assertSame('تحليل الزيارة الأساسية', $record->analyze);
-        $this->assertSame('تقييم وتحليل مدمج', $record->followups->first()->assess_and_analyze);
+        // The rich editor stores its text as HTML paragraphs.
+        $this->assertSame('<p>الطفلة تعاني من نقص واضح في الوزن مع صعوبة في الرضاعة، وتقييم مطوّل مكتوب بحرية دون أي قائمة خيارات جاهزة.</p>', $record->assess);
+        $this->assertSame('<p>تحليل الزيارة الأساسية</p>', $record->analyze);
+        $this->assertSame('<p>تقييم وتحليل مدمج</p>', $record->followups->first()->assess_and_analyze);
 
         // The merged field belongs to the session, never to the record itself.
         $this->assertNotContains('assess_and_analyze', $record->getFillable());
@@ -492,8 +493,8 @@ class IndividualCounselingFormTest extends TestCase
 
     /**
      * The assessment is prose the counsellor writes, so the field has to be a
-     * textarea. It used to be a Select over a fixed list, which could not hold
-     * what actually gets recorded.
+     * free-text editor. It used to be a Select over a fixed list, which could
+     * not hold what actually gets recorded.
      */
     public function test_assess_and_analyze_are_free_text_fields(): void
     {
@@ -507,9 +508,9 @@ class IndividualCounselingFormTest extends TestCase
             );
 
             $this->assertInstanceOf(
-                \Filament\Forms\Components\Textarea::class,
+                \Filament\Forms\Components\RichEditor::class,
                 $component,
-                "[{$field}] must be a free-text textarea.",
+                "[{$field}] must be a free-text editor.",
             );
         }
     }

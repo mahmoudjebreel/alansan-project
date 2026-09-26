@@ -2,9 +2,12 @@
 
 namespace App\Exports;
 
+use App\Filament\Resources\IndividualCounselingResource;
 use App\Models\IndividualCounseling;
 use App\Models\IndividualCounselingFollowup;
+use App\Support\RichText;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 class IndividualCounselingExport extends AbstractTableExport
@@ -42,6 +45,19 @@ class IndividualCounselingExport extends AbstractTableExport
     }
 
     /**
+     * The rich-text notes print as text: a cell shows the words and the
+     * line structure, never the editor's tags.
+     */
+    protected function formatValue(Model $record, string $field): mixed
+    {
+        $value = parent::formatValue($record, $field);
+
+        return in_array($field, IndividualCounselingResource::RICH_TEXT_FIELDS, true)
+            ? RichText::toPlain($value)
+            : $value;
+    }
+
+    /**
      * The own columns, then one numbered group of three columns per follow-up
      * session: date, merged assessment, action.
      */
@@ -70,8 +86,8 @@ class IndividualCounselingExport extends AbstractTableExport
         foreach (range(1, $this->maxFollowups()) as $i) {
             $followup = $followups->get($i - 1);
             $row[] = $followup?->follow_up_visit_date?->format('Y-m-d');
-            $row[] = $followup?->assess_and_analyze;
-            $row[] = $followup?->act;
+            $row[] = RichText::toPlain($followup?->assess_and_analyze);
+            $row[] = RichText::toPlain($followup?->act);
         }
 
         return $row;

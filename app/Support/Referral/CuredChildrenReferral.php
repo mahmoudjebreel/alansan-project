@@ -43,6 +43,12 @@ final class CuredChildrenReferral
     public const BLOCKER_NO_VISIT = 'no_visit';
 
     /**
+     * The child is recorded as died and the record would be dated after the
+     * death. A dead child is not returned to the Children module.
+     */
+    public const BLOCKER_DIED = 'died';
+
+    /**
      * Cured follow-up records no Children row was written from.
      *
      * The ID number must be present because Children stores the child under
@@ -113,8 +119,14 @@ final class CuredChildrenReferral
             return self::BLOCKER_MISSING_DATA;
         }
 
-        if ($record->latestAttendedVisit() === null) {
+        $latestVisit = $record->latestAttendedVisit();
+
+        if ($latestVisit === null) {
             return self::BLOCKER_NO_VISIT;
+        }
+
+        if (ChildFollowUpTransfer::refusesDischargeToChildren($record, $latestVisit) !== null) {
+            return self::BLOCKER_DIED;
         }
 
         return null;

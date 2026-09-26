@@ -2,22 +2,29 @@
 
 namespace App\Support;
 
+use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Support\Import\ImportDateParser;
+use Illuminate\Database\Eloquent\Builder;
 use Carbon\Carbon;
 
 /**
  * A child whose history ended in a death is never entered again.
  *
  * Whether the child died is read from the follow-up module and nowhere else:
- * the child's latest closed episode ended as died (FollowUpChild::
- * terminalEpisodeFor()). What is refused is anything that would enter the
+ * the child has an episode, trash included, that ended as died (FollowUpChild::
+ * terminalEpisodeFor()) - whatever came or was deleted after it. What is
+ * refused is anything that would enter the
  * child again AFTER that: a new episode by any route, and a new screening
  * dated after the death. The history up to and including the death stays
  * exactly as it is - it can be read, exported, and uploaded again - so a row
  * that describes that history is not a re-entry and is not refused.
  *
- *   A screening (Children)    refused when dated after the death, or undated.
+ *   A new Children record,    refused whatever its date: a died child's ID is
+ *   or another record given   never registered as a child again. Identity
+ *   the died child's ID       decides, not the date typed on the form.
+ *   A screening (Children)    refused when dated after the death, or undated
+ *                             (an upload, or a date corrected on a record).
  *   An uploaded episode       refused when admitted after the died episode was
  *   (Follow Up Child import)  admitted, or with no admission date. The died
  *                             episode itself, and every earlier one, is history.
@@ -32,6 +39,19 @@ final class TerminalChild
 {
     /** Container key for the upload's one-pass copy of the terminal list. */
     private const MEMO = 'terminal-child.episodes';
+
+    /**
+     * The reason a Children record may not be registered under this child ID
+     * - a new record, or an existing one given this ID - or null when it may.
+     * Identity alone decides: a child recorded as died is never registered
+     * again as a child, whatever date the record carries.
+     */
+    public static function refusesRegistration(mixed $idNumber): ?string
+    {
+        return filled($idNumber) && FollowUpChild::isTerminal($idNumber)
+            ? __('ui.died_terminal.registration_refused')
+            : null;
+    }
 
     /**
      * The reason a new screening for this child on this date is refused, or
@@ -108,9 +128,9 @@ final class TerminalChild
      * History up to and including the death, the death itself among it,
      * restores as it always did.
      *
-     * The death is read from the child's other episodes, trash included, so
-     * the episode being restored cannot count as the latest closure that
-     * hides the death it follows.
+     * The death is read from the child's other episodes, trash included, in
+     * the order terminalEpisodeFor() reads them: any died episode counts,
+     * whatever came after it.
      */
     public static function refusesRestore(FollowUpChild $episode): ?string
     {
@@ -118,18 +138,20 @@ final class TerminalChild
             return null;
         }
 
-        $latest = FollowUpChild::withTrashed()
+        $died = FollowUpChild::withTrashed()
             ->where('id_number', $episode->id_number)
             ->whereKeyNot($episode->getKey())
-            ->latestClosedFirst()
+            ->where('discharge_outcome', FollowUpChild::DIED_OUTCOME)
+            ->orderBy('admission_date')
+            ->orderBy('id')
             ->first();
 
-        if ($latest?->discharge_outcome !== FollowUpChild::DIED_OUTCOME) {
+        if ($died === null) {
             return null;
         }
 
         $admitted = static::day($episode->admission_date);
-        $diedEpisodeAdmitted = static::day($latest->admission_date) ?? static::day($latest->discharge_date);
+        $diedEpisodeAdmitted = static::day($died->admission_date) ?? static::day($died->discharge_date);
 
         return $admitted === null || $diedEpisodeAdmitted === null || $admitted > $diedEpisodeAdmitted
             ? __('ui.died_terminal.restore_refused')
@@ -137,13 +159,28 @@ final class TerminalChild
     }
 
     /**
-     * The keys, among the trashed episodes the query selects, that may not be
+     * The reason a trashed Children record may not be restored, or null when
+     * it may: a screening dated after the child's death would put the child
+     * back into the programme after it. The same line every screening is
+     * held to (refusesScreening()); history up to and including the death
+     * restores as it always did.
+     */
+    public static function refusesChildRestore(Child $child): ?string
+    {
+        return static::refusesScreening($child->child_id, $child->date_of_reporting) !== null
+            ? __('ui.died_terminal.child_restore_refused')
+            : null;
+    }
+
+    /**
+     * The keys, among the trashed records the query selects, that may not be
      * restored - for the set-based restore, which runs without model events.
-     * Only children with a died episode on file are looked at.
+     * Follow-up episodes and Children records alike; only children with a
+     * died episode on file are looked at.
      *
      * @return list<int>
      */
-    public static function unrestorableKeys(\Illuminate\Database\Eloquent\Builder $trashed): array
+    public static function unrestorableKeys(Builder $trashed): array
     {
         $died = FollowUpChild::withTrashed()
             ->where('discharge_outcome', FollowUpChild::DIED_OUTCOME)
@@ -156,12 +193,16 @@ final class TerminalChild
             return [];
         }
 
+        $children = $trashed->getModel() instanceof Child;
+
         return (clone $trashed)
             ->reorder()
-            ->whereIn('id_number', $died)
+            ->whereIn($children ? 'child_id' : 'id_number', $died)
             ->get()
-            ->filter(static fn (FollowUpChild $episode): bool => static::refusesRestore($episode) !== null)
-            ->map(static fn (FollowUpChild $episode): int => (int) $episode->getKey())
+            ->filter(static fn ($record): bool => ($children
+                ? static::refusesChildRestore($record)
+                : static::refusesRestore($record)) !== null)
+            ->map(static fn ($record): int => (int) $record->getKey())
             ->values()
             ->all();
     }
@@ -199,7 +240,7 @@ final class TerminalChild
     {
         $messages = $exception->errors()['data.child_id'] ?? [];
 
-        if (in_array(static::message(), $messages, true)) {
+        if (array_intersect([static::message(), __('ui.died_terminal.registration_refused')], $messages) !== []) {
             static::audit($workflow, $idNumber, $properties);
         }
     }

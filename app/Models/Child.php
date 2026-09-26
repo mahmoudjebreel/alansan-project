@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use App\Support\MuacClassifier;
+use App\Support\TerminalChild;
 use App\Traits\NotifiesSuperAdminOnChange;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -38,6 +40,27 @@ class Child extends Model
         'has_unaccompanied_children', 'unaccompanied_children_count',
         'has_released_children', 'source_follow_up_child_id',
     ];
+
+    protected static function booted(): void
+    {
+        // A screening dated after the child's death is not brought back from
+        // the trash (the set-based restore asks excludeUnrestorable()).
+        static::restoring(static fn (Child $child): ?bool => TerminalChild::refusesChildRestore($child) !== null ? false : null);
+    }
+
+    /**
+     * Narrow a set-based restore to the records that may be restored.
+     * BulkRecordWriter runs without model events, so the restoring guard
+     * above is applied here instead.
+     *
+     * @see \App\Support\TerminalChild::refusesChildRestore()
+     */
+    public static function excludeUnrestorable(Builder $trashed): Builder
+    {
+        $refused = TerminalChild::unrestorableKeys($trashed);
+
+        return $refused === [] ? $trashed : $trashed->whereKeyNot($refused);
+    }
 
     protected $casts = [
         'date_of_reporting' => 'date',

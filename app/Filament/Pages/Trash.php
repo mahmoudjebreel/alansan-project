@@ -434,22 +434,36 @@ class Trash extends Page
     {
         abort_unless(auth()->user()?->can('trash.restore') ?? false, 403);
 
-        // Episodes dated after a child's death stay in the trash; say how
-        // many, so a partial restore is never silent.
-        $refused = 0;
+        // Episodes and screenings dated after a child's death stay in the
+        // trash; say how many, so a partial restore is never silent.
+        $refused = ['episodes' => 0, 'children' => 0];
 
         foreach ($this->selectedQueries() as $query) {
-            if ($query->getModel() instanceof FollowUpChild) {
-                $refused += count(\App\Support\TerminalChild::unrestorableKeys($query));
+            $model = $query->getModel();
+
+            if ($model instanceof FollowUpChild) {
+                $refused['episodes'] += count(\App\Support\TerminalChild::unrestorableKeys($query));
+            } elseif ($model instanceof Child) {
+                $refused['children'] += count(\App\Support\TerminalChild::unrestorableKeys($query));
             }
         }
 
-        if ($refused > 0) {
+        if (array_sum($refused) > 0) {
             \App\Support\TerminalChild::audit('trash_bulk_restore', null, ['refused' => $refused]);
+
+            $body = [];
+
+            if ($refused['episodes'] > 0) {
+                $body[] = __('ui.died_terminal.restore_refused_count', ['count' => $refused['episodes']]);
+            }
+
+            if ($refused['children'] > 0) {
+                $body[] = __('ui.died_terminal.child_restore_refused_count', ['count' => $refused['children']]);
+            }
 
             \Filament\Notifications\Notification::make()
                 ->title(__('ui.died_terminal.restore_refused_title'))
-                ->body(__('ui.died_terminal.restore_refused_count', ['count' => $refused]))
+                ->body(implode(' ', $body))
                 ->warning()
                 ->persistent()
                 ->send();
@@ -556,15 +570,22 @@ class Trash extends Page
             return false;
         }
 
-        // A model may refuse its own restore (a follow-up episode dated
-        // after the child's death); the reason is told, not swallowed.
+        // A model may refuse its own restore (a follow-up episode or a
+        // screening dated after the child's death); the reason is told, not
+        // swallowed.
         if (! $record->restore()) {
-            if ($record instanceof FollowUpChild) {
-                \App\Support\TerminalChild::audit('trash_restore', $record->id_number, ['follow_up_child_id' => $record->getKey()]);
+            [$idNumber, $reason] = match (true) {
+                $record instanceof FollowUpChild => [$record->id_number, \App\Support\TerminalChild::refusesRestore($record) ?? __('ui.died_terminal.restore_refused')],
+                $record instanceof Child => [$record->child_id, \App\Support\TerminalChild::refusesChildRestore($record) ?? __('ui.died_terminal.child_restore_refused')],
+                default => [null, null],
+            };
+
+            if ($reason !== null) {
+                \App\Support\TerminalChild::audit('trash_restore', $idNumber, [$type . '_id' => $record->getKey()]);
 
                 \Filament\Notifications\Notification::make()
                     ->title(__('ui.died_terminal.restore_refused_title'))
-                    ->body(\App\Support\TerminalChild::refusesRestore($record) ?? __('ui.died_terminal.restore_refused'))
+                    ->body($reason)
                     ->danger()
                     ->send();
             }

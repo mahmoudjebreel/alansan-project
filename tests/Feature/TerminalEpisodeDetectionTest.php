@@ -9,9 +9,10 @@ use Tests\TestCase;
 
 /**
  * terminalEpisodes() - one query for every child - must decide exactly what
- * terminalEpisodeFor() decides one child at a time: the latest closed episode,
- * trash included, ordered by discharge date (an undated closure last) and
- * then by id, and terminal only when that episode ended as died.
+ * terminalEpisodeFor() decides one child at a time: a child with ANY died
+ * episode on file, trash included, is terminal, whatever came after it; the
+ * earliest died episode (by admission, then id) is the one its dates are
+ * read from.
  */
 class TerminalEpisodeDetectionTest extends TestCase
 {
@@ -28,21 +29,21 @@ class TerminalEpisodeDetectionTest extends TestCase
         $histories = [
             // A single death.
             '470500001' => [['died', '2026-05-01', '2026-05-20']],
-            // Died, then a later closure: not terminal.
+            // Died, then a later closure: still terminal - a death is final.
             '470500002' => [['died', '2026-05-01', '2026-05-20'], ['cured', '2026-06-01', '2026-06-20']],
             // A closure, then the death: terminal.
             '470500003' => [['defaulted', '2026-03-01', '2026-03-20'], ['died', '2026-05-01', '2026-05-20']],
-            // Equal discharge dates: the higher id wins - here the death.
+            // Equal discharge dates, the death second: terminal.
             '470500004' => [['cured', '2026-05-01', '2026-05-20'], ['died', '2026-05-02', '2026-05-20']],
-            // Equal discharge dates, the death first: not terminal.
+            // Equal discharge dates, the death first: still terminal.
             '470500005' => [['died', '2026-05-01', '2026-05-20'], ['cured', '2026-05-02', '2026-05-20']],
-            // An undated death ranks after every dated closure: not terminal.
+            // An undated death beside a dated closure: still terminal.
             '470500006' => [['died', '2026-05-01', null], ['non_responded', '2026-03-01', '2026-03-20']],
             // An undated death with no dated closure: terminal.
             '470500007' => [['died', '2026-05-01', null]],
-            // Two undated closures: the higher id wins - the death.
+            // Two undated closures, one of them the death: terminal.
             '470500008' => [['cured', '2026-03-01', null], ['died', '2026-05-01', null]],
-            // An open episode after nothing closed: not terminal.
+            // An open episode and no death: not terminal.
             '470500009' => [['under_follow_up', '2026-05-01', null]],
         ];
 
@@ -54,13 +55,16 @@ class TerminalEpisodeDetectionTest extends TestCase
 
         // A death moved to the trash still ends the history.
         $this->episode('470500010', 'died', '2026-05-01', '2026-05-20')->delete();
-        // A later closure in the trash still outranks a death.
+        // A later closure in the trash does not hide the death.
         $this->episode('470500011', 'died', '2026-05-01', '2026-05-20');
         $this->episode('470500011', 'cured', '2026-06-01', '2026-06-20')->delete();
+        // Two deaths on file: the earliest is the one the dates are read from.
+        $this->episode('470500012', 'died', '2026-07-01', '2026-07-10');
+        $this->episode('470500012', 'died', '2026-04-01', '2026-04-10');
 
         $bulk = FollowUpChild::terminalEpisodes();
 
-        foreach ([...array_keys($histories), '470500010', '470500011'] as $idNumber) {
+        foreach ([...array_keys($histories), '470500010', '470500011', '470500012'] as $idNumber) {
             $single = FollowUpChild::terminalEpisodeFor($idNumber);
 
             $this->assertSame($single !== null, isset($bulk[$idNumber]), "[{$idNumber}] terminal in one and not the other.");
@@ -73,10 +77,12 @@ class TerminalEpisodeDetectionTest extends TestCase
             }
         }
 
+        // Every child with a death on file, and only those.
         $this->assertEqualsCanonicalizing(
-            ['470500001', '470500003', '470500004', '470500007', '470500008', '470500010'],
+            ['470500001', '470500002', '470500003', '470500004', '470500005', '470500006', '470500007', '470500008', '470500010', '470500011', '470500012'],
             array_map('strval', array_keys($bulk)),
         );
+        $this->assertSame(['admitted' => '2026-04-01', 'died_on' => '2026-04-10'], $bulk['470500012']);
     }
 
     public function test_the_bulk_reading_is_one_query(): void
