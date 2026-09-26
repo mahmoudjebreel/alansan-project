@@ -53,6 +53,10 @@ final class ExcelImportService
         $startedAt = \Carbon\CarbonImmutable::now();
         $startedTimer = microtime(true);
 
+        // The row validators that compare rows with each other and with what
+        // is on file start every upload from nothing.
+        \App\Support\Import\FollowUpImportRules::beginUpload();
+
         Excel::import($importer, $path);
 
         if (! $importer->hasHeadings()) {

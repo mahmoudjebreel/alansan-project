@@ -89,6 +89,13 @@ final class BulkRecordWriter
             return 0;
         }
 
+        // A model can hold some of its trashed rows back (a follow-up episode
+        // dated after the child's death); its own restoring guard does not
+        // run here, because this path runs without model events.
+        if (method_exists($model, 'excludeUnrestorable')) {
+            $query = $model::excludeUnrestorable($query);
+        }
+
         return static::run($query, action: null, callback: fn (array $keys): int => $model->newQueryWithoutScopes()
             ->whereIn($model->getKeyName(), $keys)
             ->whereNotNull($model->getDeletedAtColumn())

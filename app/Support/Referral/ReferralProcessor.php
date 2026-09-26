@@ -43,8 +43,9 @@ final class ReferralProcessor
      *
      * A child whose latest closed episode ended as cured or non-responded is
      * not skipped: the referral opens a new episode for them, and the
-     * transfer classifies it (a relapse, a readmission after relapse, or a
-     * new admission) exactly as it does for a Children screening.
+     * transfer classifies it (a readmission after relapse after a SAM/MAM
+     * cure, a new admission otherwise) exactly as it does for a Children
+     * screening.
      */
     public const OUTCOME_SKIPPED_CLOSED = 'skipped_closed';
 
@@ -120,14 +121,15 @@ final class ReferralProcessor
         foreach (array_chunk($ids, 500) as $chunk) {
             $children = Child::query()->whereKey($chunk)->get();
 
-            // One query for the whole chunk. Doing this per child is the
+            // One query each for the whole chunk. Doing this per child is the
             // shape that makes a five-figure referral run unusable.
-            $states = ReferralCandidates::followUpStateForChildIds(
-                $children->pluck('child_id')->all(),
-            );
+            [
+                'states' => $states,
+                'latestClosed' => $latestClosed,
+            ] = ReferralCandidates::followUpHistoryForChildIds($children->pluck('child_id')->all());
 
             foreach ($children as $child) {
-                $outcome = static::referOne($child, $states, $terminal, $batch, $actor);
+                $outcome = static::referOne($child, $states, $latestClosed, $terminal, $batch, $actor);
 
                 $result[$outcome]++;
 
@@ -154,11 +156,13 @@ final class ReferralProcessor
      * duplicated.
      *
      * @param  array<string, string>  $states  updated in place as episodes open
+     * @param  array<string, string>  $latestClosed  child ID => latest closed outcome
      * @param  array<string, mixed>  $terminal  child IDs whose history ended in a death
      */
     private static function referOne(
         Child $child,
         array &$states,
+        array $latestClosed,
         array $terminal,
         ?ReferralBatch $batch,
         ?User $actor,
@@ -184,11 +188,13 @@ final class ReferralProcessor
         // A closed history is referred again only when its latest episode
         // does not call for a readmission: after a default or an eligible
         // other exit the child is readmitted one at a time with the
-        // Readmission action, exactly as before. The test is the one that
-        // action is offered by, so every closed child has exactly one way
-        // back. How the new episode is classified is the transfer's decision.
+        // Readmission action, exactly as before. This is the test that action
+        // is offered by (readmittableEpisodeFor()) - nothing open, not
+        // terminal, both already settled above - read from the batch, so
+        // every closed child has exactly one way back without a query of its
+        // own. How the new episode is classified is the transfer's decision.
         if ($state === ReferralCandidates::STATE_CLOSED
-            && FollowUpChild::readmittableEpisodeFor($child->child_id) !== null) {
+            && in_array($latestClosed[(string) $child->child_id] ?? null, FollowUpChild::READMISSION_OUTCOMES, true)) {
             static::logSkipped($child, self::OUTCOME_SKIPPED_CLOSED, $batch, $actor);
 
             return self::OUTCOME_SKIPPED_CLOSED;
@@ -250,6 +256,9 @@ final class ReferralProcessor
                     'child_id' => $child->child_id,
                     'child_name' => $child->name,
                     'classification' => $followUpChild->admitted_with,
+                    // How the new episode is classified (New, or the kind of
+                    // readmission), as every screen and report reads it.
+                    'admission_classification' => $followUpChild->readmissionClassification() ?? FollowUpChild::ADMISSION_NEW,
                     'referral_batch_id' => $batch?->getKey(),
                 ])
                 ->event('referred')

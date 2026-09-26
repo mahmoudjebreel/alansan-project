@@ -30,8 +30,8 @@ use Tests\TestCase;
  *   Readmission after Defaulted a return after a default - as often as it happens
  *   Readmission after Other     a return after an eligible other exit - as often
  *
- * There is no separate Relapse classification, and MEAL counts all three
- * readmissions under Readmission; its Relapse admission column stays empty.
+ * There is no separate Relapse classification. MEAL counts a readmission
+ * after relapse under Relapse admission, and the other two under Readmission.
  *
  * The model, the listing column and both its filters, the export and the MEAL
  * report are all checked against the same expectation, for episodes opened
@@ -324,15 +324,15 @@ class UnifiedAdmissionClassificationTest extends TestCase
         $totals = app(MealReportService::class)
             ->buildPeriod(ReportPeriod::make(2026, 1, 9), null)[MealReportLayout::SHEET_CMAM]['totals'];
 
-        $byCategory = ['new' => 0, 'readmission' => 0];
+        $byCategory = ['new' => 0, 'relapse' => 0, 'readmission' => 0];
 
         foreach ($expected as [$episode, $classification]) {
             $byCategory[FollowUpChild::admissionCategoryOf($classification)]++;
         }
 
-        $this->assertSame(['new' => 4, 'readmission' => 4], $byCategory);
+        $this->assertSame(['new' => 4, 'relapse' => 2, 'readmission' => 2], $byCategory);
         $this->assertSame($byCategory['new'], $this->sumAdmissions($totals, 'new'));
-        $this->assertSame(0, $this->sumAdmissions($totals, 'relapse'), 'No return is a Relapse admission.');
+        $this->assertSame($byCategory['relapse'], $this->sumAdmissions($totals, 'relapse'));
         $this->assertSame($byCategory['readmission'], $this->sumAdmissions($totals, 'readmission'));
         $this->assertSame(count($expected), $this->sumAdmissions($totals, null), 'Every episode counted exactly once.');
     }

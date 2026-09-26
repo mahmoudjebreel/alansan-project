@@ -286,9 +286,16 @@ class FollowUpChildrenExportTest extends TestCase
         // The export query sees all three.
         $this->assertSame(3, $page->instance()->allHistoryExportQuery()->count());
 
-        $page->call('downloadExcel')->assertFileDownloaded('follow-up-children.csv');
+        // Collected from the CSV route, not returned through Livewire.
+        $redirect = $page->call('downloadExcel')->effects['redirect'] ?? null;
+        $this->assertStringContainsString('/exports/csv/', (string) $redirect);
 
-        $content = base64_decode(data_get($page->effects, 'download.content'));
+        $response = $this->get($redirect);
+        $response->assertOk();
+        $response->assertDownload('follow-up-children.csv');
+
+        $content = file_get_contents($response->baseResponse->getFile()->getPathname());
+        @unlink($response->baseResponse->getFile()->getPathname());
 
         $this->assertStringStartsWith("\xEF\xBB\xBF", $content);
 

@@ -123,6 +123,7 @@ class ReferralCenter extends Page implements HasTable
             ReferralCandidates::STATUS_PENDING => 'warning',
             ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED => 'info',
             ReferralCandidates::STATUS_IN_FOLLOW_UP => 'success',
+            ReferralCandidates::STATUS_DIED => 'danger',
             default => 'gray',
         };
     }
@@ -319,10 +320,11 @@ class ReferralCenter extends Page implements HasTable
                     ->openUrlInNewTab()
                     ->visible(fn (Child $record): bool => static::followUpUrl($record) !== null),
                 // The same child, back with a SAM or MAM reading after a
-                // closed episode. The bulk referral above leaves these rows
-                // alone on purpose; this is the one-child, one-decision way
-                // to open a NEW episode for them, marked as a readmission and
-                // linked to the closed one. The closed record is not touched.
+                // default or an eligible other exit. The bulk referral leaves
+                // these rows alone on purpose; this is the one-child,
+                // one-decision way to open a NEW episode for them, marked as a
+                // readmission and linked to the closed one. The closed record
+                // is not touched.
                 Action::make('readmit')
                     ->label(__('fields.readmission'))
                     ->icon('heroicon-o-arrow-path-rounded-square')
@@ -330,8 +332,9 @@ class ReferralCenter extends Page implements HasTable
                     ->authorize(fn (): bool => static::canRefer())
                     // Offered only when the closed episode ended with one of
                     // the outcomes that allow a readmission. Being closed is
-                    // not the test: a cured, defaulted, non-responded or
-                    // deceased child is listed here and offered nothing.
+                    // not the test: a child back after a cure or a
+                    // non-response is referred with the bulk action instead,
+                    // and a child who died is offered nothing at all.
                     ->visible(fn (Child $record): bool => static::canRefer()
                         && static::statusOf($record) === ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED
                         && FollowUpChild::readmittableEpisodeFor($record->child_id) !== null)
@@ -467,6 +470,7 @@ class ReferralCenter extends Page implements HasTable
                     'child_id' => $record->child_id,
                     'child_name' => $record->name,
                     'classification' => $followUpChild->admitted_with,
+                    'admission_classification' => $followUpChild->readmissionClassification() ?? FollowUpChild::ADMISSION_NEW,
                     'previous_follow_up_child_id' => $followUpChild->previous_follow_up_child_id,
                     'referral_batch_id' => $this->currentBatch()?->getKey(),
                 ])

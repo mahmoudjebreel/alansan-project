@@ -302,6 +302,24 @@
             const t = dashboardReferralText;
             const accent = fi === "SAM" ? "#dc2626" : "#d97706";
             const history = followUpHistoryFor(component);
+
+            // A child whose latest episode ended as died is not entered again:
+            // said plainly instead of asking about a referral. The save that
+            // follows is refused by the server with the same message.
+            if (history !== null && history.terminal === true) {
+                return Swal.fire({
+                    title: t.died_title,
+                    html: window.dashboardDialogBody(
+                        window.dashboardDialogRow(t.child, childName(form, component), "#2563eb")
+                        + `<p style="margin-top: 12px; padding: 10px; background-color: #fef2f2; ${dashboardStartBorder}: 4px solid #ef4444; color: #991b1b; font-weight: bold; border-radius: 4px; font-size: 14px;">${history.terminal_message ?? ""}</p>`
+                    ),
+                    icon: "error",
+                    confirmButtonText: t.died_ok,
+                    confirmButtonColor: "#6b7280",
+                    background: window.dashboardIsDark() ? "#1f2937" : "#ffffff",
+                    color: window.dashboardIsDark() ? "#f9fafb" : "#111827",
+                });
+            }
             // A readmission only after an outcome that allows one; a closed
             // episode on its own is not enough, and the server says which.
             const readmission = history !== null && history.state === "closed" && history.readmission === true;
@@ -314,9 +332,9 @@
             }
 
             // The classification the server decided from the child's history
-            // - after defaulted, after other, after relapse - and why. A
-            // relapse follows a cured episode, which is not a readmission, so
-            // it is shown here whether or not the readmission rows are.
+            // - after defaulted, after other, after relapse - and why. Every
+            // one of them is a readmission, and the server says so in
+            // history.readmission.
             if (history !== null && history.state === "closed" && history.classification) {
                 historyHtml += window.dashboardDialogRow(t.classification, history.classification, "#b45309")
                     + window.dashboardDialogRow(t.reason, history.reason ?? "-", "#6b7280");

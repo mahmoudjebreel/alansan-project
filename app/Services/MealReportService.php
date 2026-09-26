@@ -406,7 +406,7 @@ class MealReportService
                 continue;
             }
 
-            // New or readmission - see cmamAdmissionKindExpression().
+            // New, relapse or readmission - see cmamAdmissionKindExpression().
             $kind = $row->admission_kind;
 
             // The template keeps SAM with oedema apart from the other SAM
@@ -495,20 +495,17 @@ class MealReportService
     }
 
     /**
-     * How an admission is reported: 'new' or 'readmission'.
+     * How an admission is reported: 'new', 'relapse' or 'readmission'.
      *
      * The classification comes from the one definition the Follow Up
-     * screens, filters and export read as well, so no episode is counted
-     * here as anything the module does not call it:
+     * screens, filters and export read as well, and the column from
+     * FollowUpChild::CATEGORY_BY_CLASSIFICATION:
      *
      *   readmission after defaulted   -> Readmission
      *   readmission after other       -> Readmission
-     *   readmission after relapse     -> Readmission
+     *   readmission after relapse     -> Relapse admission (SAM or MAM, cured,
+     *                                    then back at SAM or MAM)
      *   everything else               -> New
-     *
-     * The template's Relapse admission column stays in the layout, unchanged,
-     * and no return is counted in it: a return after a cure is a readmission
-     * after relapse, and is counted with the readmissions.
      *
      * The stored admission_type plays no part: an imported value there does
      * not override the child's history.
@@ -524,8 +521,8 @@ class MealReportService
         // A simple CASE, so the classification is worked out once per row.
         $arms = '';
 
-        foreach (FollowUpChild::READMISSION_KINDS as $kind) {
-            $arms .= " WHEN '{$kind}' THEN '" . FollowUpChild::CATEGORY_READMISSION . "'";
+        foreach (FollowUpChild::CATEGORY_BY_CLASSIFICATION as $classification => $category) {
+            $arms .= " WHEN '{$classification}' THEN '{$category}'";
         }
 
         return 'CASE ' . FollowUpChild::readmissionClassificationSql($table)

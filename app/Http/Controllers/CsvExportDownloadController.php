@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ExcelActionOccurred;
 use App\Exports\CsvExport;
 use App\Exports\CsvExportTicket;
 use App\Exports\IncompleteCsvExportException;
+use App\Support\Activity\AuditEvents;
+use App\Support\Notifications\ActionType;
 use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\App;
@@ -42,9 +45,13 @@ class CsvExportDownloadController extends Controller
         set_time_limit(0);
 
         try {
-            $path = CsvExport::build(CsvExportTicket::export($parked), CsvExportTicket::keys($parked));
+            $keys = CsvExportTicket::keys($parked);
+            $path = CsvExport::build(CsvExportTicket::export($parked), $keys);
         } catch (IncompleteCsvExportException $e) {
             report($e);
+
+            // One audit entry for the failed export, with its reason.
+            AuditEvents::exportFailed($parked['module'], 'csv', $e->getMessage());
 
             Notification::make()
                 ->title(__('ui.csv_export.failed_title'))
@@ -53,8 +60,17 @@ class CsvExportDownloadController extends Controller
                 ->persistent()
                 ->send();
 
-            return redirect()->to(url()->previous(route('home')));
+            // Back to the listing the export was asked from - a fixed address
+            // inside the application, never whatever the Referer header says.
+            return redirect()->to($parked['return']);
         }
+
+        // Sent once: the ticket is done with.
+        CsvExportTicket::forget($ticket);
+
+        // One audit entry for the whole export, with how many rows it holds -
+        // announced now that the file is complete, not when it was asked for.
+        ExcelActionOccurred::dispatch($parked['module'], ActionType::EXPORT, auth()->user(), count($keys));
 
         return response()
             ->download($path, $parked['filename'], ['Content-Type' => 'text/csv; charset=UTF-8'])

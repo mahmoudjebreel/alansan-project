@@ -51,18 +51,26 @@ class ListChildren extends ListRecords
     {
         abort_unless(auth()->user()?->can('children.export') ?? false, 403);
 
-        // Announce the export after the fact; it cannot affect the download.
-        ExcelActionOccurred::dispatch('Child', ActionType::EXPORT, auth()->user());
-
         $query = $this->exportQuery();
 
         // Up to the threshold the XLSX download is exactly what it always
         // was. Above it the same columns and values go out as a CSV file that
         // is written and checked in full before it is sent: PhpSpreadsheet
         // holds a whole workbook in memory, and a large one cannot be built.
+        // That export is announced by the download route, with its row count,
+        // once the file is complete.
         if ((clone $query)->count() > CsvExport::THRESHOLD) {
-            return CsvExport::start(new ChildrenExport($query), 'children.export', 'children.csv');
+            return CsvExport::start(
+                new ChildrenExport($query),
+                'children.export',
+                'children.csv',
+                'Child',
+                ChildResource::getUrl('index'),
+            );
         }
+
+        // Announce the export after the fact; it cannot affect the download.
+        ExcelActionOccurred::dispatch('Child', ActionType::EXPORT, auth()->user());
 
         return Excel::download(new ChildrenExport($query), 'children.xlsx');
     }

@@ -1061,8 +1061,9 @@ final class ImportDefinition
                 // the first of those for a while; an upload asked for neither,
                 // so a file could close a hundred episodes with no date on any
                 // of them and the reports would count none of the discharges.
-                // An episode admitted after a death is refused as well.
-                rowValidator: [\App\Support\TerminalChild::class, 'forImportedFollowUpRow'],
+                // An episode admitted after a death (on file or in the same
+                // upload) is refused as well, and so is a second open episode.
+                rowValidator: [\App\Support\Import\FollowUpImportRules::class, 'forImportedRow'],
             ),
         ])->keyBy('key')->all();
     }

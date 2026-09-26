@@ -18,6 +18,8 @@
         ['key' => 'closed_cases', 'color' => 'gray'],
         ['key' => 'needs_review', 'color' => 'danger'],
         ['key' => 'missing_follow_up_muac', 'color' => 'danger'],
+        // Children who died: listed, never referable.
+        ['key' => 'died', 'color' => 'danger'],
     ];
 @endphp
 
@@ -45,7 +47,7 @@
 
     {{-- Where the cases stand: what is waiting, what is being treated, what
          has closed, and the two kinds of missing measurement. --}}
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
         @foreach ($counters as $counter)
             <x-filament::section compact>
                 <div class="text-sm text-gray-500 dark:text-gray-400">

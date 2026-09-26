@@ -71,6 +71,22 @@ class CreateChild extends CreateRecord
     }
 
     /**
+     * Save the screening; a save the death refuses is audited once.
+     */
+    public function create(bool $another = false): void
+    {
+        try {
+            parent::create($another);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            \App\Support\TerminalChild::auditRefusedSave($exception, 'children_form', $this->data['child_id'] ?? null, [
+                'date_of_reporting' => $this->data['date_of_reporting'] ?? null,
+            ]);
+
+            throw $exception;
+        }
+    }
+
+    /**
      * Every screening is kept in Children whatever it says; a MAM or SAM
      * reading additionally opens a follow-up episode for the same child.
      *
@@ -98,6 +114,8 @@ class CreateChild extends CreateRecord
         // screening stands (it predates the death, or the form would have
         // refused it) and the screener is told why nothing was opened.
         if (MuacClassifier::isMalnourished($child->fi) && FollowUpChild::isTerminal($child->child_id)) {
+            \App\Support\TerminalChild::audit('children_create', $child->child_id, ['child_record_id' => $child->getKey()]);
+
             Notification::make()
                 ->title(__('ui.died_terminal.follow_up_refused'))
                 ->body(__('ui.died_terminal.message'))
@@ -114,7 +132,7 @@ class CreateChild extends CreateRecord
         }
 
         // A child back after a closed episode was readmitted, and is told so.
-        $readmitted = $followUpChild->isReadmission();
+        $readmitted = $followUpChild->derivedAdmissionType() === FollowUpChild::ADMISSION_READMISSION;
 
         Notification::make()
             ->title(__($readmitted ? 'fields.readmitted_to_follow_up_title' : 'fields.referred_to_follow_up_title'))

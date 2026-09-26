@@ -11,6 +11,7 @@ use App\Traits\NotifiesSuperAdminOnChange;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -143,21 +144,64 @@ class FollowUpChild extends Model
     ];
 
     /**
-     * The classifications that make an episode a readmission.
+     * The classifications that make an episode a readmission (its admission
+     * type as shown and exported).
      *
      * @var array<string>
      */
     public const READMISSION_KINDS = self::READMISSION_CLASSIFICATIONS;
 
     /**
-     * The CMAM report admission column an episode is counted in: every
-     * episode is exactly one of them. No return is counted under the
-     * template's Relapse admission column; a return after a cure is a
-     * readmission after relapse and is counted with the readmissions.
+     * The rules, as data - the one place they are written down. What the
+     * outcome of the episode a return follows makes that return. The PHP
+     * reading (classifyReturn()) and the SQL reading
+     * (readmissionClassificationSql()) are both generated from this table,
+     * so the two cannot say different things.
+     *
+     * @var array<string, array<string>>  classification => previous outcomes
+     */
+    public const RETURN_RULES = [
+        self::READMISSION_AFTER_DEFAULTED => [self::DEFAULTED_OUTCOME],
+        self::READMISSION_AFTER_OTHER => self::OTHER_READMISSION_OUTCOMES,
+        self::READMISSION_AFTER_RELAPSE => [self::CURED_OUTCOME],
+    ];
+
+    /**
+     * The rules above that hold only between two SAM/MAM episodes: the
+     * episode followed was admitted at SAM or MAM, and so is the return
+     * (either programme on either side).
+     *
+     * @var array<string>
+     */
+    public const MALNOURISHED_RETURN_RULES = [
+        self::READMISSION_AFTER_RELAPSE,
+    ];
+
+    /**
+     * The CMAM report admission columns. Every episode is counted in exactly
+     * one of them.
      */
     public const CATEGORY_NEW = 'new';
 
+    public const CATEGORY_RELAPSE = 'relapse';
+
     public const CATEGORY_READMISSION = 'readmission';
+
+    /**
+     * Which CMAM admission column each classification is counted in; an
+     * episode with no classification is New.
+     *
+     * A readmission after relapse keeps that name everywhere in the module,
+     * and is counted in the template's Relapse admission column - not in
+     * Readmission, which is for returns after a default or an other exit.
+     *
+     * @var array<string, string>
+     */
+    public const CATEGORY_BY_CLASSIFICATION = [
+        self::READMISSION_AFTER_DEFAULTED => self::CATEGORY_READMISSION,
+        self::READMISSION_AFTER_OTHER => self::CATEGORY_READMISSION,
+        self::READMISSION_AFTER_RELAPSE => self::CATEGORY_RELAPSE,
+    ];
 
     /**
      * A first admission. Also what a NULL admission_type means: every record
@@ -267,6 +311,10 @@ class FollowUpChild extends Model
      *   3. a SAM/MAM episode closed as cured          -> after relapse
      *   4. anything else - cured with no SAM/MAM classification, non-responded,
      *      died, or not closed at all                 -> null (a new admission)
+     *
+     * Every caller asks about a SAM/MAM return (a screening that admits, or a
+     * readmission after a default or an other exit, which does not depend on
+     * the reading), so the return is taken as SAM here.
      */
     public function classifiesReturnAs(): ?string
     {
@@ -274,20 +322,31 @@ class FollowUpChild extends Model
             return null;
         }
 
-        if ($this->discharge_outcome === self::DEFAULTED_OUTCOME) {
-            return self::READMISSION_AFTER_DEFAULTED;
+        return static::classifyReturn($this->discharge_outcome, $this->admitted_with, MuacClassifier::SAM);
+    }
+
+    /**
+     * The rules (RETURN_RULES), in PHP: what a return admitted with
+     * $returningWith is, after an episode that closed with $previousOutcome
+     * and had been admitted with $previousAdmittedWith. Null is a new
+     * admission - after a non-response, a death, a cure that was not SAM/MAM,
+     * or an outcome that does not close an episode.
+     */
+    public static function classifyReturn(?string $previousOutcome, ?string $previousAdmittedWith, ?string $returningWith): ?string
+    {
+        foreach (self::RETURN_RULES as $classification => $outcomes) {
+            if (! in_array($previousOutcome, $outcomes, true)) {
+                continue;
+            }
+
+            if (in_array($classification, self::MALNOURISHED_RETURN_RULES, true)
+                && ! (MuacClassifier::isMalnourished($previousAdmittedWith) && MuacClassifier::isMalnourished($returningWith))) {
+                continue;
+            }
+
+            return $classification;
         }
 
-        if (in_array($this->discharge_outcome, self::OTHER_READMISSION_OUTCOMES, true)) {
-            return self::READMISSION_AFTER_OTHER;
-        }
-
-        if ($this->discharge_outcome === self::CURED_OUTCOME
-            && MuacClassifier::isMalnourished($this->admitted_with)) {
-            return self::READMISSION_AFTER_RELAPSE;
-        }
-
-        // NEW_AFTER_OUTCOMES, died, and a cure with no SAM/MAM admission.
         return null;
     }
 
@@ -335,13 +394,11 @@ class FollowUpChild extends Model
 
     /**
      * Which of the three CMAM admission columns an episode with the given
-     * classification is counted in.
+     * classification is counted in (CATEGORY_BY_CLASSIFICATION).
      */
     public static function admissionCategoryOf(?string $classification): string
     {
-        return in_array($classification, self::READMISSION_KINDS, true)
-            ? self::CATEGORY_READMISSION
-            : self::CATEGORY_NEW;
+        return self::CATEGORY_BY_CLASSIFICATION[$classification] ?? self::CATEGORY_NEW;
     }
 
     /**
@@ -402,10 +459,22 @@ class FollowUpChild extends Model
 
         return static::query()
             ->where('id_number', $idNumber)
-            ->whereIn('discharge_outcome', self::CLOSING_OUTCOMES)
-            ->orderByDesc('discharge_date')
-            ->orderByDesc('id')
+            ->latestClosedFirst()
             ->first();
+    }
+
+    /**
+     * Closed episodes only, the latest first: by discharge date, most recent
+     * first with an undated closure last, then by id. The one ordering every
+     * "latest closed episode" reading uses; latestClosedSql() is the same
+     * ordering written as a condition.
+     */
+    public function scopeLatestClosedFirst(Builder $query): Builder
+    {
+        return $query
+            ->whereIn($this->qualifyColumn('discharge_outcome'), self::CLOSING_OUTCOMES)
+            ->orderByDesc($this->qualifyColumn('discharge_date'))
+            ->orderByDesc($this->qualifyColumn('id'));
     }
 
     // -----------------------------------------------------------------
@@ -428,9 +497,7 @@ class FollowUpChild extends Model
 
         $latest = static::withTrashed()
             ->where('id_number', $idNumber)
-            ->whereIn('discharge_outcome', self::CLOSING_OUTCOMES)
-            ->orderByDesc('discharge_date')
-            ->orderByDesc('id')
+            ->latestClosedFirst()
             ->first();
 
         return $latest?->discharge_outcome === self::DIED_OUTCOME ? $latest : null;
@@ -447,37 +514,85 @@ class FollowUpChild extends Model
     /**
      * Every child ID whose latest closed episode ended as died, with the
      * dates of that episode - the same decision as terminalEpisodeFor(), for
-     * the whole table in one pass, so an upload of any size is checked
-     * without a query per row.
+     * the whole table in one query, so an upload or a bulk referral of any
+     * size is checked without a query per row.
      *
-     * Walked in ascending (discharge_date, id) order, so the last episode
-     * seen for an ID is the one terminalEpisodeFor() would pick first; both
-     * databases put a NULL discharge date first in ascending order and last
-     * in descending order.
+     * Only died episodes are read, each kept when no closed episode of the
+     * same child (trash included) ranks before it in latestClosedFirst()
+     * order - the condition latestClosedSql() writes out.
      *
      * @return array<string, array{admitted: ?string, died_on: ?string}>
      */
     public static function terminalEpisodes(): array
     {
-        $latest = [];
+        $table = (new static)->getTable();
+        $alias = 'terminal';
 
-        static::withTrashed()
-            ->whereNotNull('id_number')
-            ->whereIn('discharge_outcome', self::CLOSING_OUTCOMES)
-            ->orderBy('discharge_date')
-            ->orderBy('id')
-            ->select(['id', 'id_number', 'discharge_outcome', 'admission_date', 'discharge_date'])
-            ->cursor()
-            ->each(function (self $episode) use (&$latest): void {
-                $latest[(string) $episode->id_number] = $episode->discharge_outcome === self::DIED_OUTCOME
-                    ? [
-                        'admitted' => $episode->admission_date?->format('Y-m-d'),
-                        'died_on' => $episode->discharge_date?->format('Y-m-d'),
-                    ]
-                    : null;
-            });
+        return DB::table("{$table} as {$alias}")
+            ->whereNotNull("{$alias}.id_number")
+            ->where("{$alias}.discharge_outcome", self::DIED_OUTCOME)
+            ->whereRaw(static::latestClosedSql($alias))
+            ->select(["{$alias}.id_number", "{$alias}.admission_date", "{$alias}.discharge_date"])
+            ->get()
+            ->mapWithKeys(static fn (object $row): array => [
+                (string) $row->id_number => [
+                    'admitted' => static::day($row->admission_date),
+                    'died_on' => static::day($row->discharge_date),
+                ],
+            ])
+            ->all();
+    }
 
-        return array_filter($latest);
+    /**
+     * "The closed episode aliased $alias is the latest closed episode of its
+     * child", trash included, as SQL: no other closed episode of the same
+     * child ranks before it in latestClosedFirst() order (discharge date
+     * descending with an undated closure last, then id descending).
+     */
+    public static function latestClosedSql(string $alias): string
+    {
+        $table = (new static)->getTable();
+        $later = "{$alias}_later";
+        $closing = static::quoted(self::CLOSING_OUTCOMES);
+
+        return "NOT EXISTS (
+            SELECT 1 FROM {$table} AS {$later}
+            WHERE {$later}.id_number = {$alias}.id_number
+              AND {$later}.id <> {$alias}.id
+              AND {$later}.discharge_outcome IN ({$closing})
+              AND (
+                  ({$later}.discharge_date IS NOT NULL AND ({$alias}.discharge_date IS NULL OR {$later}.discharge_date > {$alias}.discharge_date))
+                  OR (
+                      ({$later}.discharge_date = {$alias}.discharge_date OR ({$later}.discharge_date IS NULL AND {$alias}.discharge_date IS NULL))
+                      AND {$later}.id > {$alias}.id
+                  )
+              )
+        )";
+    }
+
+    /**
+     * "The child ID in $idColumn is terminal" as SQL - terminalEpisodeFor()
+     * for a correlated query, such as a Children listing.
+     */
+    public static function terminalChildSql(string $idColumn): string
+    {
+        $table = (new static)->getTable();
+        $alias = 'terminal_child';
+
+        return "EXISTS (
+            SELECT 1 FROM {$table} AS {$alias}
+            WHERE {$alias}.id_number = {$idColumn}
+              AND {$alias}.discharge_outcome = '" . self::DIED_OUTCOME . "'
+              AND " . static::latestClosedSql($alias) . '
+        )';
+    }
+
+    /**
+     * A stored date, as the "Y-m-d" day both databases hand back differently.
+     */
+    private static function day(mixed $value): ?string
+    {
+        return blank($value) ? null : Carbon::parse($value)->format('Y-m-d');
     }
 
     // -----------------------------------------------------------------
@@ -540,7 +655,8 @@ class FollowUpChild extends Model
      * The classification of the episode aliased $alias, as SQL: one of
      * READMISSION_CLASSIFICATIONS, or NULL for a new admission.
      *
-     * Decided by the episode it follows (previousEpisodeIdSql()):
+     * Decided by the episode it follows (previousEpisodeIdSql()), by the same
+     * RETURN_RULES classifyReturn() reads:
      *
      *   defaulted                          -> after defaulted
      *   an eligible other exit             -> after other
@@ -559,17 +675,22 @@ class FollowUpChild extends Model
         $table = (new static)->getTable();
         $previous = "{$alias}_prev";
         $malnourished = static::quoted([MuacClassifier::SAM, MuacClassifier::MAM]);
-        $other = static::quoted(self::OTHER_READMISSION_OUTCOMES);
+
+        $arms = '';
+
+        foreach (self::RETURN_RULES as $classification => $outcomes) {
+            $condition = "{$previous}.discharge_outcome IN (" . static::quoted($outcomes) . ')';
+
+            if (in_array($classification, self::MALNOURISHED_RETURN_RULES, true)) {
+                $condition .= " AND {$previous}.admitted_with IN ({$malnourished})"
+                    . " AND {$alias}.admitted_with IN ({$malnourished})";
+            }
+
+            $arms .= " WHEN {$condition} THEN '{$classification}'";
+        }
 
         return "(
-            SELECT CASE
-                WHEN {$previous}.discharge_outcome = '" . self::DEFAULTED_OUTCOME . "' THEN '" . self::READMISSION_AFTER_DEFAULTED . "'
-                WHEN {$previous}.discharge_outcome IN ({$other}) THEN '" . self::READMISSION_AFTER_OTHER . "'
-                WHEN {$previous}.discharge_outcome = '" . self::CURED_OUTCOME . "'
-                     AND {$previous}.admitted_with IN ({$malnourished})
-                     AND {$alias}.admitted_with IN ({$malnourished})
-                THEN '" . self::READMISSION_AFTER_RELAPSE . "'
-            END
+            SELECT CASE{$arms} END
             FROM {$table} AS {$previous}
             WHERE {$previous}.id = " . static::previousEpisodeIdSql($alias) . '
         )';
@@ -688,6 +809,24 @@ class FollowUpChild extends Model
         foreach (['saved', 'deleted', 'restored'] as $event) {
             static::{$event}(static fn () => \App\Support\TerminalChild::forget());
         }
+
+        // An episode dated after the child's death is not brought back from
+        // the trash (the set-based restore asks excludeUnrestorable()).
+        static::restoring(static fn (FollowUpChild $episode): ?bool => \App\Support\TerminalChild::refusesRestore($episode) !== null ? false : null);
+    }
+
+    /**
+     * Narrow a set-based restore to the episodes that may be restored.
+     * BulkRecordWriter runs without model events, so the restoring guard
+     * above is applied here instead.
+     *
+     * @see \App\Support\TerminalChild::refusesRestore()
+     */
+    public static function excludeUnrestorable(Builder $trashed): Builder
+    {
+        $refused = \App\Support\TerminalChild::unrestorableKeys($trashed);
+
+        return $refused === [] ? $trashed : $trashed->whereKeyNot($refused);
     }
 
     /**

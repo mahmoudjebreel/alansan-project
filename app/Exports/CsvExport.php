@@ -23,6 +23,23 @@ use Illuminate\Support\Facades\File;
  * The columns and the values are the module export's own - headings() and
  * map() - so a row reads exactly as it does in the XLSX file.
  *
+ * Production requirements (verify on the server; nothing here changes them):
+ *
+ *   - storage/app/csv-exports must be writable by the web server, with free
+ *     disk space for the largest export (a whole module, 150,000 rows, is in
+ *     the order of 100 MB). Files left behind by a request that was killed
+ *     are removed by the next export once they are an hour old.
+ *   - set_time_limit() must be allowed: the download route lifts PHP's own
+ *     limit for its request. The web server's and any proxy's timeout still
+ *     apply, and nothing is sent until the file is complete, so they must be
+ *     longer than the largest export takes to write (measured locally at
+ *     about 0.3 ms a row; the production figure has to be measured there).
+ *     A request cut off by them fails with an error - never a partial file.
+ *   - The route (exports.csv) is new: when routes are cached in production,
+ *     rebuild the route cache from Cache Management after deploying.
+ *   - Tickets are kept in the application cache for LIFETIME seconds and
+ *     removed once their file is sent.
+ *
  * @see \App\Exports\CsvExportTicket
  * @see \App\Http\Controllers\CsvExportDownloadController
  */
@@ -38,16 +55,19 @@ class CsvExport
     /** Records read per round trip while the file is written. */
     public const CHUNK = 500;
 
+    /** Seconds after which a temporary file nobody collected is removed. */
+    public const ORPHAN_SECONDS = 3600;
+
     /**
      * Park the export and send the browser to the route that writes it.
      *
      * Untyped, like PdfExport::start(): inside a Livewire action redirect()
      * hands back Livewire's own redirector rather than a RedirectResponse.
      */
-    public static function start(AbstractTableExport $export, string $ability, string $filename)
+    public static function start(AbstractTableExport $export, string $ability, string $filename, string $module, string $returnUrl)
     {
         return redirect()->route('exports.csv', [
-            'ticket' => CsvExportTicket::issue($export, $ability, $filename),
+            'ticket' => CsvExportTicket::issue($export, $ability, $filename, $module, $returnUrl),
         ]);
     }
 
@@ -64,8 +84,9 @@ class CsvExport
      */
     public static function build(AbstractTableExport $export, array $keys, ?int $chunk = null): string
     {
-        $directory = storage_path('app/csv-exports');
+        $directory = static::directory();
         File::ensureDirectoryExists($directory);
+        static::sweep($directory);
 
         $path = tempnam($directory, 'csv-');
 
@@ -73,11 +94,26 @@ class CsvExport
             throw IncompleteCsvExportException::unwritable();
         }
 
+        // A request killed part way - a server timeout, the memory limit -
+        // never reaches the catch below; this still removes its half file.
+        $finished = false;
+        register_shutdown_function(static function () use (&$finished, $path): void {
+            if (! $finished && is_file($path)) {
+                @unlink($path);
+            }
+        });
+
         $expected = count($keys);
         $written = 0;
         $seen = [];
 
         try {
+            // An export whose columns depend on the rows it writes (the
+            // follow-up export's visit columns) settles them on these keys.
+            if (method_exists($export, 'prepareForKeys')) {
+                $export->prepareForKeys($keys);
+            }
+
             // The BOM makes Excel read the file as UTF-8, so Arabic opens as
             // typed rather than as mojibake.
             static::write($handle, "\xEF\xBB\xBF");
@@ -114,6 +150,7 @@ class CsvExport
         } catch (\Throwable $e) {
             fclose($handle);
             @unlink($path);
+            $finished = true;
 
             // Whatever stopped it - a missing row, a failed write, the
             // database - the result is the same: no file, and the reason kept.
@@ -123,8 +160,36 @@ class CsvExport
         }
 
         fclose($handle);
+        $finished = true;
 
         return $path;
+    }
+
+    /**
+     * Where the files are written while they are checked.
+     */
+    public static function directory(): string
+    {
+        return storage_path('app/csv-exports');
+    }
+
+    /**
+     * Remove temporary files older than ORPHAN_SECONDS - the ones a request
+     * that was killed could not remove itself. A file still being written or
+     * sent is far younger than that and is left alone.
+     */
+    public static function sweep(?string $directory = null): int
+    {
+        $removed = 0;
+        $cutoff = time() - self::ORPHAN_SECONDS;
+
+        foreach (File::glob(($directory ?? static::directory()) . DIRECTORY_SEPARATOR . 'csv-*') as $file) {
+            if (is_file($file) && filemtime($file) < $cutoff && @unlink($file)) {
+                $removed++;
+            }
+        }
+
+        return $removed;
     }
 
     /**

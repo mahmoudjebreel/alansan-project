@@ -100,6 +100,21 @@ final class AuditEvents
         );
     }
 
+    /**
+     * An export that could not be completed and was not sent.
+     */
+    public static function exportFailed(string $module, string $format, string $reason): ?Activity
+    {
+        return self::write(
+            logName: self::LOG_EXPORT,
+            event: 'export_failed',
+            description: "{$module} {$format} export failed",
+            properties: ['module' => $module, 'format' => $format, 'reason' => $reason],
+            subject: null,
+            causer: self::currentUser(),
+        );
+    }
+
     public static function mealExport(string $site, string $period): ?Activity
     {
         return self::write(

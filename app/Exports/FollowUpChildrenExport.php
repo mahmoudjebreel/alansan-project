@@ -235,6 +235,28 @@ class FollowUpChildrenExport extends AbstractTableExport
     }
 
     /**
+     * Settle the visit columns on exactly the episodes a parked CSV export
+     * will write: the highest visit number among them (at least 1). Read in
+     * blocks, so a six-figure key list never becomes one statement.
+     *
+     * @param  list<int|string>  $keys
+     *
+     * @see \App\Exports\CsvExport::build()
+     */
+    public function prepareForKeys(array $keys): void
+    {
+        $highest = 0;
+
+        foreach (array_chunk($keys, 1000) as $block) {
+            $highest = max($highest, (int) FollowUpChildVisit::query()
+                ->whereIn('follow_up_child_id', $block)
+                ->max('visit_number'));
+        }
+
+        $this->maxVisits = max(1, min(FollowUpChild::MAX_VISITS, $highest));
+    }
+
+    /**
      * Highest visit number present in the exported data set (at least 1).
      */
     protected function maxVisits(): int

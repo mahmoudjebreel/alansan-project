@@ -192,8 +192,10 @@ class ReferralStatusAndFollowUpViewsTest extends TestCase
                 'discharge_outcome' => $outcome,
             ]);
 
+            // Every closing outcome closes the episode; a death is also
+            // named as one.
             $this->assertSame(
-                ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
+                $outcome === FollowUpChild::DIED_OUTCOME ? ReferralCandidates::STATUS_DIED : ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
                 $this->selectedStatus($child),
                 "[{$outcome}] should close the episode.",
             );

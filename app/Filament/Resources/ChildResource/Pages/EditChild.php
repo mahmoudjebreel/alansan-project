@@ -44,6 +44,23 @@ class EditChild extends EditRecord
     }
 
     /**
+     * Save the screening; a save the death refuses is audited once.
+     */
+    public function save(bool $shouldRedirect = true, bool $shouldSendSavedNotification = true): void
+    {
+        try {
+            parent::save($shouldRedirect, $shouldSendSavedNotification);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            \App\Support\TerminalChild::auditRefusedSave($exception, 'children_form', $this->data['child_id'] ?? null, [
+                'date_of_reporting' => $this->data['date_of_reporting'] ?? null,
+                'child_record_id' => $this->record?->getKey(),
+            ]);
+
+            throw $exception;
+        }
+    }
+
+    /**
      * A measurement corrected upwards into SAM or MAM opens a follow-up
      * episode, once the screener has confirmed it.
      *
@@ -93,6 +110,8 @@ class EditChild extends EditRecord
 
         // A child whose history ended in a death is never admitted again.
         if (FollowUpChild::isTerminal($child->child_id)) {
+            \App\Support\TerminalChild::audit('children_edit', $child->child_id, ['child_record_id' => $child->getKey()]);
+
             Notification::make()
                 ->title(__('ui.died_terminal.follow_up_refused'))
                 ->body(__('ui.died_terminal.message'))
@@ -111,7 +130,7 @@ class EditChild extends EditRecord
         $this->openedFollowUpChild = $followUpChild;
 
         // A child back after a closed episode was readmitted, and is told so.
-        $readmitted = $followUpChild->isReadmission();
+        $readmitted = $followUpChild->derivedAdmissionType() === FollowUpChild::ADMISSION_READMISSION;
 
         Notification::make()
             ->title(__($readmitted ? 'fields.readmitted_to_follow_up_title' : 'ui.referral.edit_referred_title'))

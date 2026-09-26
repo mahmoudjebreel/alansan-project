@@ -368,6 +368,8 @@ class ChildResource extends Resource
             ? FollowUpChild::readmissionClassificationFor($childId)
             : null;
 
+        $terminal = $episode !== null && FollowUpChild::isTerminal($childId);
+
         $livewire->dispatch('follow-up-history-known', [
             'child_id' => (string) $childId,
             'state' => match (true) {
@@ -379,9 +381,15 @@ class ChildResource extends Resource
                 ? __('fields.' . $episode->discharge_outcome)
                 : null,
             'discharge_date' => $episode?->discharge_date?->format('Y-m-d'),
-            // Whether a new episode would be a readmission: only after one of
-            // the outcomes that allow it, never merely because it is closed.
-            'readmission' => $episode?->canBeReadmitted() ?? false,
+            // Whether a new episode would be a readmission - after a default,
+            // an other exit or a relapse - read from the classification the
+            // transfer would give it, never merely from the episode being
+            // closed. (The Readmission button keeps its own, narrower test.)
+            'readmission' => in_array($classification, FollowUpChild::READMISSION_KINDS, true),
+            // A child whose latest episode ended as died is not entered again;
+            // the form says so before the screener is asked anything.
+            'terminal' => $terminal,
+            'terminal_message' => $terminal ? TerminalChild::message() : null,
             // How a new episode would be classified - after defaulted, after
             // other, after relapse - and why, decided by the closed episode
             // on file; null when a new episode would be a first admission.

@@ -6,6 +6,7 @@ use App\Models\Child;
 use App\Models\FollowUpChild;
 use App\Models\FollowUpChildVisit;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -30,6 +31,13 @@ use Illuminate\Support\Facades\DB;
 final class ChildFollowUpTransfer
 {
     /**
+     * The longest one child's episode lock can be held, in seconds - an
+     * upper bound in case a request dies holding it, far longer than the
+     * few queries it guards.
+     */
+    public const LOCK_SECONDS = 10;
+
+    /**
      * Open a follow-up episode for a child who has just been screened at MAM
      * or SAM, unless one is already open for them.
      *
@@ -48,26 +56,31 @@ final class ChildFollowUpTransfer
             return null;
         }
 
-        if (static::hasOpenEpisode($child->child_id)) {
-            return null;
-        }
+        return static::whileLocked($child->child_id, function () use ($child, $fi): ?FollowUpChild {
+            if (static::hasOpenEpisode($child->child_id)) {
+                return null;
+            }
 
-        // A child whose history ended in a death is never admitted again.
-        if (FollowUpChild::isTerminal($child->child_id)) {
-            return null;
-        }
+            // A child whose history ended in a death is never admitted again.
+            if (FollowUpChild::isTerminal($child->child_id)) {
+                return null;
+            }
 
-        // A child whose latest closed episode classifies a return is the same
-        // child coming back, and the new episode is linked to that episode
-        // so it says what it is: a readmission after a default, an other
-        // exit, or a cured SAM/MAM episode (after relapse). After
-        // any other closed outcome - non-responded, cured with no SAM/MAM
-        // classification - the episode opens as a first admission with no
-        // link, exactly as it always did. The closed episode is only read
-        // here, never written.
-        $previous = FollowUpChild::classifyingEpisodeFor($child->child_id);
+            // A child whose latest closed episode classifies a return is the
+            // same child coming back, and the new episode is linked to that
+            // episode so it says what it is: a readmission after a default,
+            // an other exit, or a cured SAM/MAM episode (after relapse). After
+            // any other closed outcome - non-responded, cured with no SAM/MAM
+            // classification - the episode opens as a first admission with no
+            // link, exactly as it always did. The closed episode is only read
+            // here, never written. (The same decision as classifyingEpisodeFor()
+            // and readmissionClassificationFor(), read once: nothing is open
+            // and the child is not terminal, as checked above.)
+            $latest = FollowUpChild::latestClosedEpisodeFor($child->child_id);
+            $classification = $latest?->classifiesReturnAs();
 
-        return static::open($child, $fi, $previous, FollowUpChild::readmissionClassificationFor($child->child_id));
+            return static::open($child, $fi, $classification !== null ? $latest : null, $classification);
+        });
     }
 
     /**
@@ -88,23 +101,25 @@ final class ChildFollowUpTransfer
             return null;
         }
 
-        if (static::hasOpenEpisode($child->child_id)) {
-            return null;
-        }
+        return static::whileLocked($child->child_id, function () use ($child, $fi): ?FollowUpChild {
+            if (static::hasOpenEpisode($child->child_id)) {
+                return null;
+            }
 
-        // A child whose history ended in a death is never readmitted.
-        if (FollowUpChild::isTerminal($child->child_id)) {
-            return null;
-        }
+            // A child whose history ended in a death is never readmitted.
+            if (FollowUpChild::isTerminal($child->child_id)) {
+                return null;
+            }
 
-        // Only a closed episode whose outcome allows a readmission qualifies.
-        $previous = FollowUpChild::readmittableEpisodeFor($child->child_id);
+            // Only a closed episode whose outcome allows a readmission qualifies.
+            $previous = FollowUpChild::readmittableEpisodeFor($child->child_id);
 
-        if ($previous === null) {
-            return null;
-        }
+            if ($previous === null) {
+                return null;
+            }
 
-        return static::open($child, $fi, $previous, $previous->classifiesReturnAs());
+            return static::open($child, $fi, $previous, $previous->classifiesReturnAs());
+        });
     }
 
     /**
@@ -128,10 +143,6 @@ final class ChildFollowUpTransfer
      */
     public static function readmitFromEpisode(FollowUpChild $previous, array $data): ?FollowUpChild
     {
-        if (! $previous->canBeReadmitted()) {
-            return null;
-        }
-
         $fi = MuacClassifier::classify($data['muac'] ?? null);
 
         if ($fi === null) {
@@ -141,6 +152,22 @@ final class ChildFollowUpTransfer
         $admissionDate = static::date($data['admission_date'] ?? null) ?? Carbon::today();
         $visitDate = static::date($data['visit_date'] ?? null) ?? $admissionDate;
 
+        return static::whileLocked($previous->id_number, function () use ($previous, $fi, $admissionDate, $visitDate, $data): ?FollowUpChild {
+            // Checked under the lock: no episode open, the child not
+            // terminal, and the outcome one that allows a readmission.
+            if (! $previous->canBeReadmitted()) {
+                return null;
+            }
+
+            return static::writeReadmission($previous, $fi, $admissionDate, $visitDate, $data);
+        });
+    }
+
+    /**
+     * @param  array{admission_date?: mixed, visit_date?: mixed, muac: mixed}  $data
+     */
+    private static function writeReadmission(FollowUpChild $previous, string $fi, Carbon $admissionDate, Carbon $visitDate, array $data): FollowUpChild
+    {
         return DB::transaction(function () use ($previous, $fi, $admissionDate, $visitDate, $data): FollowUpChild {
             $followUpChild = FollowUpChild::create([
                 'id_number' => $previous->id_number,
@@ -226,6 +253,46 @@ final class ChildFollowUpTransfer
 
             return $followUpChild;
         });
+    }
+
+    /**
+     * Run the check-and-open for one child ID while holding that child's
+     * episode lock, so two requests at once - a bulk referral and a form
+     * save, two tabs, a double click - can never both pass the "nothing is
+     * open" check and open two episodes.
+     *
+     * The lock is taken without waiting: a second attempt that finds it held
+     * opens nothing (null), which is also the right answer once the first
+     * has finished, as the child is then under follow-up. A blank ID has
+     * nothing to share a lock with.
+     *
+     * @param  \Closure(): ?FollowUpChild  $open  re-checks everything itself
+     */
+    private static function whileLocked(mixed $idNumber, \Closure $open): ?FollowUpChild
+    {
+        if (blank($idNumber)) {
+            return $open();
+        }
+
+        $lock = Cache::lock(static::lockKey($idNumber), self::LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            return $open();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * The name of one child's episode lock.
+     */
+    public static function lockKey(mixed $idNumber): string
+    {
+        return 'follow-up-episode:' . $idNumber;
     }
 
     /**

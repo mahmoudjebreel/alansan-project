@@ -179,6 +179,7 @@ return [
             'previously_followed' => 'Closed / previously followed',
             'in_follow_up' => 'Already in follow-up',
             'needs_review' => 'Needs review (no MUAC)',
+            'died' => 'Died - cannot be referred',
             'missing_muac' => 'Missing',
         ],
         'follow_up_status' => [
@@ -186,6 +187,7 @@ return [
             'previously_followed' => 'Closed episode on file',
             'in_follow_up' => 'Active follow-up',
             'needs_review' => 'Never followed up',
+            'died' => 'Latest episode ended with Died',
         ],
         'status_filter' => [
             'all' => 'Every screened child (SAM, MAM and no MUAC)',
@@ -196,6 +198,7 @@ return [
             'previously_followed' => 'Closed / previously followed',
             'in_follow_up' => 'Already in follow-up',
             'needs_review' => 'Missing MUAC',
+            'died' => 'Died (cannot be referred)',
             'active_follow_ups' => 'Active follow-ups',
             'closed_cases' => 'Closed cases',
             'missing_follow_up_muac' => 'Missing follow-up measurements',
@@ -245,6 +248,9 @@ return [
         // shown with its reason. Informational: it is never chosen by hand.
         'classification' => 'Classification',
         'reason' => 'Reason',
+        // A child whose latest follow-up episode ended as died.
+        'died_title' => '⛔ This child cannot be registered again',
+        'died_ok' => 'OK',
     ],
 
     // -----------------------------------------------------------------
@@ -289,6 +295,15 @@ return [
     'died_terminal' => [
         'message' => 'Child cannot be registered again because the latest Follow-Up episode ended with Died.',
         'follow_up_refused' => 'Follow-Up not opened',
+        'restore_refused_title' => 'Not restored',
+        'restore_refused' => 'This Follow-Up episode cannot be restored: it is dated after the child\'s Follow-Up episode that ended with Died.',
+        'restore_refused_count' => ':count Follow-Up episode(s) were not restored because they are dated after the child\'s Follow-Up episode that ended with Died. They stay in the trash.',
+    ],
+
+    'follow_up_import' => [
+        'died_in_file' => 'Child :id cannot be registered again: another row in this file records that the child\'s Follow-Up episode ended with Died, and this row is dated after it.',
+        'open_on_file' => 'Child :id already has an open Follow-Up episode. A new episode cannot be imported for this child until that one is closed.',
+        'open_in_file' => 'Child :id has an open Follow-Up episode in another row of this file. A child can have only one open episode, and no episode can start on or after an open one.',
     ],
 
     'csv_export' => [

@@ -87,8 +87,12 @@ class ReferralClosedFollowUpIdentityTest extends TestCase
      */
     private function assertRecognisedAsClosed(Child $child, FollowUpChild $episode): void
     {
-        $this->assertSame(ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED, $this->selectedStatus($child));
-        $this->assertSame(ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED, ReferralCandidates::statusFor($child));
+        $status = $episode->discharge_outcome === FollowUpChild::DIED_OUTCOME
+            ? ReferralCandidates::STATUS_DIED
+            : ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED;
+
+        $this->assertSame($status, $this->selectedStatus($child));
+        $this->assertSame($status, ReferralCandidates::statusFor($child));
         $this->assertSame(
             [$child->child_id => ReferralCandidates::STATE_CLOSED],
             ReferralCandidates::followUpStateForChildIds([$child->child_id]),
@@ -167,8 +171,9 @@ class ReferralClosedFollowUpIdentityTest extends TestCase
             $episode = $this->closedEpisode($childId, $outcome, 'SAM');
             $child = $this->child(110, $childId);
 
+            // A closed episode and the child exists; a death says so.
             $this->assertSame(
-                ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
+                $outcome === FollowUpChild::DIED_OUTCOME ? ReferralCandidates::STATUS_DIED : ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
                 $this->selectedStatus($child),
                 "[{$outcome}] is a closed episode and the child exists.",
             );

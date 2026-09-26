@@ -38,16 +38,23 @@ class CsvExportTicket
     /**
      * Park an export and return the token that collects it.
      *
+     * @param  string  $module  the module name the audit trail uses (Child,
+     *                          FollowUpChild), recorded once the file is sent
+     * @param  string  $returnUrl  where a user is sent back to, inside the
+     *                             application, when the export cannot be
+     *                             completed
      * @return string  the token, for the route
      */
-    public static function issue(AbstractTableExport $export, string $ability, string $filename): string
+    public static function issue(AbstractTableExport $export, string $ability, string $filename, string $module, string $returnUrl): string
     {
         $query = $export->query();
         $model = $query->getModel();
 
-        // One record is one row, however many times a join repeated it.
+        // One record is one row, however many times a join repeated it. The
+        // keys alone are read: whatever else the export selects per row is
+        // read when the file is written, not here.
         $keys = array_values(array_unique(
-            $query->pluck($model->getQualifiedKeyName())->all(),
+            (clone $query)->select($model->getQualifiedKeyName())->pluck($model->getKeyName())->all(),
             SORT_REGULAR,
         ));
 
@@ -68,9 +75,19 @@ class CsvExportTicket
             'count' => count($keys),
             'checksum' => sha1($list),
             'filename' => $filename,
+            'module' => $module,
+            'return' => $returnUrl,
         ], self::LIFETIME);
 
         return $token;
+    }
+
+    /**
+     * Discard a parked export once its file has been sent.
+     */
+    public static function forget(string $token): void
+    {
+        Cache::forget(self::key($token));
     }
 
     /**

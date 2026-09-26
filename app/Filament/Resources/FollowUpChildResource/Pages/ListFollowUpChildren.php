@@ -2,9 +2,8 @@
 
 namespace App\Filament\Resources\FollowUpChildResource\Pages;
 
-use App\Events\ExcelActionOccurred;
 use App\Support\Activity\AuditEvents;
-use App\Support\Notifications\ActionType;
+use App\Exports\CsvExport;
 use App\Exports\FollowUpChildrenExport;
 use App\Exports\FollowUpChildPdfExport;
 use App\Filament\Resources\FollowUpChildResource;
@@ -98,29 +97,37 @@ class ListFollowUpChildren extends ListRecords
     }
 
     /**
-     * The whole follow-up history as one streamed CSV.
+     * The whole follow-up history as one CSV file.
      *
      * Every episode on file - open, closed under any outcome, historical,
      * and each readmission as its own row - whatever tab the listing is
      * showing. The export used to read the table's own query, so with the
      * Active tab open it wrote the fifty-odd open cases and nothing else.
      *
-     * Streamed rather than built as a workbook: the history runs to
-     * something like 150,000 rows, and PhpSpreadsheet holds the whole sheet
-     * in memory before it writes a byte. The CSV is written a chunk at a
-     * time and opens in Excel, Arabic included.
+     * Not returned from this action: the history runs to something like
+     * 150,000 rows, and a file returned through Livewire is buffered whole.
+     * The episodes are parked and the browser collects the file from the CSV
+     * route, which writes it in primary-key order - as before - and checks it
+     * row by row before a byte is sent. The route announces the export, with
+     * its row count, once the file is complete.
      *
-     * @see \App\Exports\FollowUpChildrenExport::writeCsv()
+     * @see \App\Exports\CsvExport
      */
     public function downloadExcel()
     {
         abort_unless(auth()->user()?->can('follow_up_children.export') ?? false, 403);
 
-        // Announce the export after the fact; it cannot affect the download.
-        ExcelActionOccurred::dispatch('FollowUpChild', ActionType::EXPORT, auth()->user());
-
-        return (new FollowUpChildrenExport($this->allHistoryExportQuery()))
-            ->toCsvResponse('follow-up-children.csv');
+        return CsvExport::start(
+            new FollowUpChildrenExport(
+                $this->allHistoryExportQuery()
+                    ->reorder()
+                    ->orderBy((new FollowUpChild)->qualifyColumn('id')),
+            ),
+            'follow_up_children.export',
+            'follow-up-children.csv',
+            'FollowUpChild',
+            FollowUpChildResource::getUrl('index'),
+        );
     }
 
     public function downloadPdf()

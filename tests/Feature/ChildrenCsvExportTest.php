@@ -25,6 +25,8 @@ class ChildrenCsvExportTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const RETURN_URL = '/admin/children';
+
     private User $user;
 
     protected function setUp(): void
@@ -147,7 +149,7 @@ class ChildrenCsvExportTest extends TestCase
         $trashedFemale->delete();
 
         // Only the live female children were on screen.
-        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()->where('sex', 'female')), 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()->where('sex', 'female')), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         $response = $this->get(route('exports.csv', ['ticket' => $token]));
         $response->assertOk();
@@ -162,7 +164,7 @@ class ChildrenCsvExportTest extends TestCase
     {
         $this->children(3);
         $export = new ChildrenExport(Child::query());
-        $token = CsvExportTicket::issue($export, 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue($export, 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         Child::first()->delete();
 
@@ -210,14 +212,63 @@ class ChildrenCsvExportTest extends TestCase
     public function test_the_route_answers_an_incomplete_export_with_a_message_not_a_file(): void
     {
         $this->children(5);
-        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         Child::withTrashed()->first()->forceDelete();
 
-        $response = $this->from('/admin/children')->get(route('exports.csv', ['ticket' => $token]));
+        // F14: back to the listing inside the application, whatever the
+        // Referer header claims.
+        $response = $this->from('https://elsewhere.example/phish')->get(route('exports.csv', ['ticket' => $token]));
 
-        $response->assertRedirect('/admin/children');
+        $response->assertRedirect(self::RETURN_URL);
         $this->assertNotInstanceOf(\Symfony\Component\HttpFoundation\BinaryFileResponse::class, $response->baseResponse);
+
+        // F7: the failure is audited once, with its reason; no success entry.
+        $failed = \Spatie\Activitylog\Models\Activity::query()->where('event', 'export_failed')->sole();
+        $this->assertSame('Child', $failed->properties['module']);
+        $this->assertSame('csv', $failed->properties['format']);
+        $this->assertSame(0, \Spatie\Activitylog\Models\Activity::query()->where('log_name', 'excel')->where('event', 'export')->count());
+    }
+
+    public function test_a_successful_export_is_audited_once_with_its_row_count_and_its_ticket_is_forgotten(): void
+    {
+        $this->children(4);
+        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
+
+        $response = $this->get(route('exports.csv', ['ticket' => $token]));
+        $response->assertOk();
+        @unlink($response->baseResponse->getFile()->getPathname());
+
+        $entry = \Spatie\Activitylog\Models\Activity::query()->where('log_name', 'excel')->where('event', 'export')->sole();
+        $this->assertSame(4, $entry->properties['record_count']);
+        $this->assertSame('Child', $entry->properties['module']);
+
+        // The ticket is done with: collecting it again finds nothing.
+        $this->get(route('exports.csv', ['ticket' => $token]))->assertNotFound();
+    }
+
+    public function test_temporary_files_older_than_an_hour_are_swept_and_new_ones_are_left(): void
+    {
+        File::ensureDirectoryExists(CsvExport::directory());
+
+        $old = CsvExport::directory() . DIRECTORY_SEPARATOR . 'csv-orphan-old';
+        $fresh = CsvExport::directory() . DIRECTORY_SEPARATOR . 'csv-orphan-fresh';
+        $other = CsvExport::directory() . DIRECTORY_SEPARATOR . 'keep-me.txt';
+
+        file_put_contents($old, 'x');
+        file_put_contents($fresh, 'x');
+        file_put_contents($other, 'x');
+        touch($old, time() - CsvExport::ORPHAN_SECONDS - 60);
+        touch($other, time() - CsvExport::ORPHAN_SECONDS - 60);
+
+        $this->assertSame(1, CsvExport::sweep());
+
+        $this->assertFileDoesNotExist($old);
+        $this->assertFileExists($fresh);
+        $this->assertFileExists($other, 'Only the export\'s own temporary files are swept.');
+
+        @unlink($fresh);
+        @unlink($other);
     }
 
     public function test_the_ticket_carries_each_record_once_even_when_a_join_repeats_it(): void
@@ -228,7 +279,7 @@ class ChildrenCsvExportTest extends TestCase
             ->select('children.*')
             ->crossJoin('roles');
 
-        $token = CsvExportTicket::issue(new ChildrenExport($query), 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue(new ChildrenExport($query), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         $this->assertCount(3, CsvExportTicket::keys(CsvExportTicket::claim($token)));
     }
@@ -243,7 +294,7 @@ class ChildrenCsvExportTest extends TestCase
 
         $this->get(route('exports.csv', ['ticket' => 'nope']))->assertNotFound();
 
-        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         $this->actingAs(User::factory()->create())
             ->get(route('exports.csv', ['ticket' => $token]))
@@ -253,7 +304,7 @@ class ChildrenCsvExportTest extends TestCase
     public function test_a_user_who_may_no_longer_export_is_refused(): void
     {
         $this->children(2);
-        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv');
+        $token = CsvExportTicket::issue(new ChildrenExport(Child::query()), 'children.export', 'children.csv', 'Child', self::RETURN_URL);
 
         $this->user->syncRoles([]);
         $this->user->syncPermissions([]);

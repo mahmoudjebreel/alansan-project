@@ -433,8 +433,9 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
         $pending = Child::factory()->create(['child_id' => '470828009', 'muac_mm' => 110, 'date_of_reporting' => '2026-09-09']);
 
         foreach ($children as $id => $child) {
+            // A child who died is recognised as such; the others as closed.
             $this->assertSame(
-                ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
+                (string) $id === '470828003' ? ReferralCandidates::STATUS_DIED : ReferralCandidates::STATUS_PREVIOUSLY_FOLLOWED,
                 ReferralCandidates::statusFor($child),
                 "[{$id}] must be recognised from the closed episode, not read as new.",
             );
@@ -445,7 +446,8 @@ class FollowUpDefaulterOpenEpisodeTest extends TestCase
 
         $summary = ReferralCandidates::statusSummary();
         $this->assertSame(1, $summary['pending']);
-        $this->assertSame(4, $summary['previously_followed']);
+        $this->assertSame(3, $summary['previously_followed']);
+        $this->assertSame(1, $summary['died']);
 
         // Referring everything: the new child, and the children back after a
         // cure or a non-response, each get a NEW episode that follows the

@@ -741,7 +741,12 @@ class ImportDuplicateAndVisitTypeTest extends TestCase
      */
     public function test_a_later_sequential_visit_for_the_same_child_still_imports(): void
     {
+        // The first episode is closed: a child with an OPEN episode may not
+        // be given a second one by an upload (F12), which is a different
+        // rule from this one and is tested in FollowUpImportRulesTest.
         $this->import('follow_up_children', [$this->followUpRow([
+            __('fields.discharge_outcome') => __('fields.defaulted'),
+            __('fields.discharge_date') => '2026-06-20',
             __('fields.visit_date_n', ['n' => 1]) => '2026-06-01',
             __('fields.visit_muac_n', ['n' => 1]) => 110,
         ])]);

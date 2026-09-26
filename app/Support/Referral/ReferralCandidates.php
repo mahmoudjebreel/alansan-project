@@ -33,16 +33,26 @@ final class ReferralCandidates
     public const STATUS_PENDING = 'pending';
 
     /**
-     * SAM or MAM, and every episode on file is closed.
+     * SAM or MAM, and every episode on file is closed (the child has not
+     * died - see STATUS_DIED).
      *
-     * Listed but never referred. A closed episode is a finished treatment
-     * history, and re-referring the child would silently start a second one;
-     * the row is shown with its history reachable so a person can decide what
-     * the case actually needs. Nothing here re-opens anything.
+     * A closed episode is never re-opened. After a cure or a non-response the
+     * Refer action opens a NEW episode that follows it, classified by the
+     * transfer; after a default or an eligible other exit the child comes
+     * back one at a time through the Readmission action.
      *
      * @see \App\Models\FollowUpChild::CLOSING_OUTCOMES
+     * @see \App\Support\Referral\ReferralProcessor::OUTCOME_SKIPPED_CLOSED
      */
     public const STATUS_PREVIOUSLY_FOLLOWED = 'previously_followed';
+
+    /**
+     * The child's latest closed episode ended as died. Shown as such, so the
+     * person reviewing the list knows before trying; never referable.
+     *
+     * @see \App\Models\FollowUpChild::terminalEpisodeFor()
+     */
+    public const STATUS_DIED = 'died';
 
     /**
      * An episode is open for this child ID. Referring again would count one
@@ -66,6 +76,7 @@ final class ReferralCandidates
     public const STATUSES = [
         self::STATUS_PENDING,
         self::STATUS_PREVIOUSLY_FOLLOWED,
+        self::STATUS_DIED,
         self::STATUS_IN_FOLLOW_UP,
         self::STATUS_NEEDS_REVIEW,
     ];
@@ -90,17 +101,16 @@ final class ReferralCandidates
      *
      * Eligible means: a MUAC that classifies as SAM or MAM, and no follow-up
      * episode of any kind on file for that child ID - neither an open one,
-     * which referring again would count twice, nor a closed one, which
-     * referring again would re-admit behind a finished treatment history.
+     * which referring again would count twice, nor a closed one, which is
+     * listed under its own status - and a child who has not died.
      *
      * This is exactly STATUS_PENDING; the two are kept as separate entry
      * points because one is the referable set and the other is the label.
      */
     public static function query(?ReferralBatch $batch = null): Builder
     {
-        return static::scopeToBatch(static::malnourished(Child::query()), $batch)
-            ->whereNotExists(static::openEpisodeSubquery())
-            ->whereNotExists(static::closedEpisodeSubquery());
+        return static::scopeToStatus(Child::query(), self::STATUS_PENDING)
+            ->tap(static fn (Builder $query) => static::scopeToBatch($query, $batch));
     }
 
     /**
@@ -157,24 +167,31 @@ final class ReferralCandidates
      */
     public static function scopeToStatus(Builder $query, ?string $status): Builder
     {
-        return match ($status) {
-            self::FILTER_ELIGIBLE => static::malnourished($query)
-                ->whereNotExists(static::openEpisodeSubquery())
-                ->whereNotExists(static::closedEpisodeSubquery()),
+        // The same precedence as statusCase(): open, died, no measurement,
+        // closed, pending.
+        $terminal = FollowUpChild::terminalChildSql('children.child_id');
 
-            self::STATUS_PENDING => static::malnourished($query)
+        return match ($status) {
+            self::FILTER_ELIGIBLE, self::STATUS_PENDING => static::malnourished($query)
                 ->whereNotExists(static::openEpisodeSubquery())
+                ->whereRaw("NOT {$terminal}")
                 ->whereNotExists(static::closedEpisodeSubquery()),
 
             self::STATUS_PREVIOUSLY_FOLLOWED => static::malnourished($query)
                 ->whereNotExists(static::openEpisodeSubquery())
+                ->whereRaw("NOT {$terminal}")
                 ->whereExists(static::closedEpisodeSubquery()),
+
+            self::STATUS_DIED => $query
+                ->whereNotExists(static::openEpisodeSubquery())
+                ->whereRaw($terminal),
 
             self::STATUS_IN_FOLLOW_UP => $query->whereExists(static::openEpisodeSubquery()),
 
             self::STATUS_NEEDS_REVIEW => $query
                 ->whereNull('muac_mm')
-                ->whereNotExists(static::openEpisodeSubquery()),
+                ->whereNotExists(static::openEpisodeSubquery())
+                ->whereRaw("NOT {$terminal}"),
 
             default => $query,
         };
@@ -194,6 +211,10 @@ final class ReferralCandidates
             return self::STATUS_IN_FOLLOW_UP;
         }
 
+        if (filled($child->child_id) && FollowUpChild::isTerminal($child->child_id)) {
+            return self::STATUS_DIED;
+        }
+
         if (blank($child->muac_mm)) {
             return self::STATUS_NEEDS_REVIEW;
         }
@@ -211,14 +232,17 @@ final class ReferralCandidates
      * rather than one query per row.
      *
      * The order of the arms is the precedence: an open episode outranks
-     * everything, and a missing measurement is answered before any attempt is
-     * made to classify one.
+     * everything, a death is said before anything else about the child, and
+     * a missing measurement is answered before any attempt is made to
+     * classify one.
      */
     public static function statusCase(): string
     {
         return 'case'
             . ' when ' . static::existsSql('fu_open', static::openEpisodeSql('fu_open'))
             . " then '" . self::STATUS_IN_FOLLOW_UP . "'"
+            . ' when ' . FollowUpChild::terminalChildSql('children.child_id')
+            . " then '" . self::STATUS_DIED . "'"
             . " when children.muac_mm is null then '" . self::STATUS_NEEDS_REVIEW . "'"
             . ' when ' . static::existsSql('fu_closed', static::closedEpisodeSql('fu_closed'))
             . " then '" . self::STATUS_PREVIOUSLY_FOLLOWED . "'"
@@ -303,34 +327,67 @@ final class ReferralCandidates
      */
     public static function followUpStateForChildIds(array $childIds): array
     {
+        return static::followUpHistoryForChildIds($childIds)['states'];
+    }
+
+    /**
+     * The outcome of each child ID's latest closed live episode, for the
+     * given IDs - latestClosedEpisodeFor() for a whole selection.
+     *
+     * @param  array<int, string|null>  $childIds
+     * @return array<string, string>  child ID => discharge outcome
+     */
+    public static function latestClosedOutcomeForChildIds(array $childIds): array
+    {
+        return static::followUpHistoryForChildIds($childIds)['latestClosed'];
+    }
+
+    /**
+     * Both of the above from ONE query: every live episode of the given IDs,
+     * read latest first in latestClosedFirst() order (discharge date, then
+     * id, both descending), so the first closed episode met for an ID is its
+     * latest closed one.
+     *
+     * @param  array<int, string|null>  $childIds
+     * @return array{states: array<string, string>, latestClosed: array<string, string>}
+     */
+    public static function followUpHistoryForChildIds(array $childIds): array
+    {
         $childIds = array_values(array_filter(
             array_unique($childIds),
             static fn (mixed $id): bool => filled($id),
         ));
 
-        if ($childIds === []) {
-            return [];
-        }
-
         $states = [];
+        $latestClosed = [];
+
+        if ($childIds === []) {
+            return ['states' => $states, 'latestClosed' => $latestClosed];
+        }
 
         FollowUpChild::query()
             ->whereIn('id_number', $childIds)
-            ->select('id_number', 'discharge_outcome')
+            ->orderByDesc('discharge_date')
+            ->orderByDesc('id')
+            ->toBase()
+            ->select(['id_number', 'discharge_outcome'])
             ->get()
-            ->each(function (FollowUpChild $episode) use (&$states): void {
-                $state = in_array($episode->discharge_outcome, FollowUpChild::CLOSING_OUTCOMES, true)
-                    ? self::STATE_CLOSED
-                    : self::STATE_OPEN;
+            ->each(function (object $episode) use (&$states, &$latestClosed): void {
+                $id = (string) $episode->id_number;
+                $closed = in_array($episode->discharge_outcome, FollowUpChild::CLOSING_OUTCOMES, true);
 
                 // Open wins: a returning child with one finished episode and
                 // one current episode is being treated, not discharged.
-                if ($state === self::STATE_OPEN || ! isset($states[$episode->id_number])) {
-                    $states[$episode->id_number] = $state;
+                if (! $closed || ! isset($states[$id])) {
+                    $states[$id] = $closed ? self::STATE_CLOSED : self::STATE_OPEN;
+                }
+
+                if ($closed) {
+                    $latestClosed[$id] ??= $episode->discharge_outcome;
                 }
             });
 
-        return $states;
+        return ['states' => $states, 'latestClosed' => $latestClosed];
     }
 
     /**
